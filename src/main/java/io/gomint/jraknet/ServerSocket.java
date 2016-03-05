@@ -80,7 +80,6 @@ public class ServerSocket implements Socket {
 		this.motd = motd;
 
 		String formatted = String.format( MOTD_FORMAT, this.motd, 0, 10 );
-		System.out.println( "MOTD = " + formatted );
 		this.motdBytes = formatted.getBytes( StandardCharsets.US_ASCII );
 	}
 

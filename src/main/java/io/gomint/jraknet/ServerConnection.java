@@ -401,7 +401,6 @@ class ServerConnection implements Connection {
 
 				// Finally send this packet buffer to its destination:
 				try {
-					System.out.println( "Sending packets" );
 					this.server.send( this.address, buffer );
 				} catch ( IOException e ) {
 					this.server.getLogger().error( "Failed to send datagram to destination", e );
@@ -575,7 +574,6 @@ class ServerConnection implements Connection {
 
 		for ( int i = 0; i < ranges.length; ++i ) {
 			for ( int j = ranges[i].getMin(); j <= ranges[i].getMax(); ++j ) {
-				System.out.println( "Received ACK for datagram " + j );
 				// Enforce immediate resend:
 				DatagramContentNode node = this.datagramContentBuffer.get( j );
 				while ( node != null ) {
@@ -831,23 +829,18 @@ class ServerConnection implements Connection {
 		byte packetId = packet.getPacketData()[0];
 		switch ( packetId ) {
 			case CONNECTED_PING:
-				System.out.println( "Received connected ping" );
 				this.handleConnectedPing( packet );
 				break;
 			case CONNECTION_REQUEST:
-				System.out.println( "Received connection request" );
 				this.handleConnectionRequest( packet );
 				break;
 			case DISCONNECTION_NOTIFICATION:
-				System.out.println( "Received disconnection notification" );
 				this.handleDisconnectionNotification( packet );
 				break;
 			case NEW_INCOMING_CONNECTION:
-				System.out.println( "Received new incoming connection" );
 				this.handleNewIncomingConnection( packet );
 				break;
 			default:
-				System.out.println( "Received data packet (0x" + Integer.toHexString( ( (int) packetId ) & 0xFF ) + ")" );
 				if ( packetId > USER_PACKET_ENUM ) {
 					synchronized ( this.receiveBuffer ) {
 						this.receiveBuffer.add( packet );
