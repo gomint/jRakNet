@@ -134,6 +134,9 @@ class ServerConnection implements Connection {
 	@Override
 	public byte[] receive() {
 		synchronized ( this.receiveBuffer ) {
+			if ( this.receiveBuffer.isEmpty() ) {
+				return null;
+			}
 			return this.receiveBuffer.poll().getPacketData();
 		}
 	}
@@ -273,6 +276,10 @@ class ServerConnection implements Connection {
 	 * @return Whether or not the connection is still active
 	 */
 	boolean update( long time ) {
+		if ( this.state == ConnectionState.UNCONNECTED ) {
+			return false;
+		}
+
 		if ( !this.state.isReliable() ) {
 			return true;
 		}
@@ -462,8 +469,8 @@ class ServerConnection implements Connection {
 	 *
 	 * @param datagram The datagram that was received
 	 */
-	void handleDatagram( DatagramPacket datagram ) {
-		this.lastReceivedPacket = System.currentTimeMillis(); // Replace time consuming task somehow
+	void handleDatagram( DatagramPacket datagram, long time ) {
+		this.lastReceivedPacket = time;
 
 		byte packetID = datagram.getData()[0];
 
@@ -964,6 +971,7 @@ class ServerConnection implements Connection {
 
 	private void handleDisconnectionNotification( EncapsulatedPacket packet ) {
 		this.state = ConnectionState.UNCONNECTED;
+		this.disconnectMessage = "Connection was forcibly closed by remote peer";
 		this.server.propagateConnectionClosed( this );
 	}
 

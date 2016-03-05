@@ -6,6 +6,7 @@ import java.net.Inet4Address;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.UUID;
 
 /**
  * @author BlackyPaw
@@ -143,6 +144,10 @@ public class PacketBuffer {
 		         ( ( (long) this.buffer[this.position++] & 0xFF ) << 16 ) |
 		         ( ( (long) this.buffer[this.position++] & 0xFF ) << 8 ) |
 		         ( ( (long) this.buffer[this.position++] & 0xFF ) ) );
+	}
+
+	public UUID readUUID() {
+		return new UUID( this.readLong(), this.readLong() );
 	}
 
 	public void skip( int length ) {
@@ -297,6 +302,11 @@ public class PacketBuffer {
 		} else {
 			throw new IllegalArgumentException( "IPv6 is not yet supported" );
 		}
+	}
+
+	public void writeUUID( UUID uuid ) {
+		this.writeLong( uuid.getMostSignificantBits() );
+		this.writeLong( uuid.getLeastSignificantBits() );
 	}
 
 	public void writeTriad( int v ) {

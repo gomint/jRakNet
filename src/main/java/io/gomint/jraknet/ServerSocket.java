@@ -423,7 +423,7 @@ public class ServerSocket implements Socket {
 			while( !this.incomingDatagrams.isEmpty() ) {
 				try {
 					datagram = this.incomingDatagrams.take();
-					this.getConnection( datagram.getSocketAddress() ).handleDatagram( datagram );
+					this.getConnection( datagram.getSocketAddress() ).handleDatagram( datagram, start );
 					this.datagramPool.putBack( datagram );
 				} catch ( InterruptedException e ) {
 					this.logger.error( "Failed to handle incoming datagram", e );
@@ -477,7 +477,8 @@ public class ServerSocket implements Socket {
 				this.udpSocket.receive( datagram );
 
 				if ( datagram.getLength() == 0 ) {
-					return;
+					this.datagramPool.putBack( datagram );
+					continue;
 				}
 
 				this.handleDatagram( datagram );
@@ -576,7 +577,7 @@ public class ServerSocket implements Socket {
 
 	private ServerConnection getConnection( SocketAddress address ) {
 		if ( !this.connectionsByAddress.containsKey( address ) ) {
-			ServerConnection connection = new ServerConnection( this, address, ConnectionState.CONNECTING );
+			ServerConnection connection = new ServerConnection( this, address, ConnectionState.UNCONNECTED );
 			this.connectionsByAddress.put( address, connection );
 			return connection;
 		}
