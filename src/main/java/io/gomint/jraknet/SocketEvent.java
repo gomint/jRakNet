@@ -34,7 +34,18 @@ public class SocketEvent {
 		 * Notifies that a client connection received an unconnected pong from a target system. Events of this type are
 		 * guaranteed to possess a ping pong info parameter.
 		 */
-		UNCONNECTED_PONG;
+		UNCONNECTED_PONG,
+
+		/**
+		 * Notifies that a client connection's connection attempt failed. Events of this type are guaranteed to possess
+		 * a reason why the connection attempt failed.
+		 */
+		CONNECTION_ATTEMPT_FAILED,
+
+		/**
+		 * Notifies that a client connection's connection attempt succeeded.
+		 */
+		CONNECTION_ATTEMPT_SUCCEEDED;
 
 	}
 
@@ -93,6 +104,11 @@ public class SocketEvent {
 		this.data = info;
 	}
 
+	SocketEvent( Type type, String reason ) {
+		this.type = type;
+		this.data = reason;
+	}
+
 	/**
 	 * Gets the type of the socket event.
 	 *
@@ -124,6 +140,18 @@ public class SocketEvent {
 	public PingPongInfo getPingPongInfo() {
 		if ( this.type == Type.UNCONNECTED_PONG ) {
 			return (PingPongInfo) this.data;
+		}
+		return null;
+	}
+
+	/**
+	 * Gets the reason of the event if applicable or null otherwise.
+	 *
+	 * @return The reason of the event
+	 */
+	public String getReason() {
+		if ( this.type == Type.CONNECTION_ATTEMPT_FAILED ) {
+			return (String) this.data;
 		}
 		return null;
 	}
