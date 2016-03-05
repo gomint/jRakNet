@@ -13,11 +13,11 @@ import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -194,14 +194,6 @@ public class ServerSocket implements Socket {
 		} finally {
 			this.receiveThread = null;
 		}
-
-		// Disconnect all connections lingering around:
-		for ( ServerConnection connection : this.connectionsByAddress.values() ) {
-			connection.disconnect( "Server is closing" );
-		}
-		this.connectionsByAddress = null;
-		this.connectionsByGuid.clear();
-		this.connectionsByGuid = null;
 
 		// Delete internal data:
 		this.currentConnections = 0;
@@ -415,8 +407,9 @@ public class ServerSocket implements Socket {
 	 * Updates all connection that belong to this server socket.
 	 */
 	private void update() {
+		long start;
 		while ( this.running.get() ) {
-			long start = System.currentTimeMillis();
+			start = System.currentTimeMillis();
 
 			// Handle all incoming datagrams:
 			DatagramPacket datagram;
@@ -464,6 +457,16 @@ public class ServerSocket implements Socket {
 				}
 			}
 		}
+
+		// Disconnect all connections lingering around:
+		start = System.currentTimeMillis();
+		for ( ServerConnection connection : this.connectionsByAddress.values() ) {
+			connection.disconnect( "Server is closing" );
+			connection.update( start );
+		}
+		this.connectionsByAddress = null;
+		this.connectionsByGuid.clear();
+		this.connectionsByGuid = null;
 	}
 
 	/**
@@ -541,8 +544,8 @@ public class ServerSocket implements Socket {
 	 * Initializes any sort of structures that are required internally.
 	 */
 	private void initializeStructures() {
-		this.connectionsByAddress = new ConcurrentHashMap<>( this.maxConnections );
-		this.connectionsByGuid = new ConcurrentHashMap<>( this.maxConnections );
+		this.connectionsByAddress = new HashMap<>( this.maxConnections );
+		this.connectionsByGuid = new HashMap<>( this.maxConnections );
 		this.incomingDatagrams = new LinkedBlockingQueue<>( 512 );
 	}
 
@@ -576,13 +579,12 @@ public class ServerSocket implements Socket {
 	}
 
 	private ServerConnection getConnection( SocketAddress address ) {
-		if ( !this.connectionsByAddress.containsKey( address ) ) {
-			ServerConnection connection = new ServerConnection( this, address, ConnectionState.UNCONNECTED );
+		ServerConnection connection = this.connectionsByAddress.get( address );
+		if ( connection == null ) {
+			connection = new ServerConnection( this, address, ConnectionState.UNCONNECTED );
 			this.connectionsByAddress.put( address, connection );
-			return connection;
 		}
-
-		return this.connectionsByAddress.get( address );
+		return connection;
 	}
 
 }

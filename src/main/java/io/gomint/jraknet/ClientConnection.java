@@ -604,7 +604,7 @@ public class ClientConnection implements Socket, Connection {
 	}
 
 	private void handleEncapsulatedDatagram( DatagramPacket datagram ) {
-		
+
 	}
 
 	// ============================================ PACKET SENDERS ============================================ //
