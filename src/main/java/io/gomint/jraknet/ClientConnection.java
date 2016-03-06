@@ -1284,7 +1284,24 @@ public class ClientConnection implements Socket, Connection {
 	}
 
 	private void handleConnectionRequestAccepted( EncapsulatedPacket packet ) {
+		PacketBuffer buffer = new PacketBuffer( packet.getPacketData(), 0 );
+		buffer.skip( 1 );                                       // Packet ID
+		buffer.readAddress();                                   // Client Address
+		if ( packet.getPacketLength() == 96 ) {
+			buffer.readUShort();                                // Remote System Index (not always applicable)
+		}
+		for ( int i = 0; i < MAX_LOCAL_IPS; ++i ) {
+			buffer.readAddress();                               // Server Local IPs
+		}
+		long pingTime = buffer.readLong();                      // Ping Time
+		long pongTime = buffer.readLong();                      // Pong Time
+
+		// Finally we are connected!
 		this.state = ConnectionState.CONNECTED;
+
+		// Send response:
+		this.sendNewIncomingConnection( pongTime );
+
 		if ( this.eventHandler != null ) {
 			SocketEvent event = new SocketEvent( SocketEvent.Type.CONNECTION_ATTEMPT_SUCCEEDED );
 			this.eventHandler.onSocketEvent( this, event );
@@ -1469,6 +1486,19 @@ public class ClientConnection implements Socket, Connection {
 		*/
 
 		this.send( PacketReliability.RELIABLE_ORDERED, 0, buffer.getBuffer(), buffer.getBufferOffset(), buffer.getPosition() - buffer.getBufferOffset() );
+	}
+
+	private void sendNewIncomingConnection( long pingTime ) {
+		PacketBuffer buffer = new PacketBuffer( 94 );
+		buffer.writeByte( NEW_INCOMING_CONNECTION );
+		buffer.writeAddress( this.remoteAddress );
+		for ( int i = 0; i < MAX_LOCAL_IPS; ++i ) {
+			buffer.writeAddress( ServerConnection.LOCAL_IP_ADDRESSES[i] );
+		}
+		buffer.writeLong( pingTime );
+		buffer.writeLong( System.currentTimeMillis() );
+
+		this.send( PacketReliability.RELIABLE_ORDERED, 0, buffer.getBuffer() );
 	}
 
 	private void sendConnectedPing( long pingTime ) {
