@@ -24,12 +24,24 @@ public class ClientSocket extends Socket {
 
 	private ClientConnection connection;
 
+	/**
+	 * Constructs a new client socket ready for use.
+	 */
 	public ClientSocket() {
 		this.logger = LoggerFactory.getLogger( ClientSocket.class );
 		this.connection = null;
 		this.generateGuid();
 	}
 
+	/**
+	 * Constructs a new client socket ready for use that will use the given logger for all
+	 * of its logging purposes.
+	 */
+	public ClientSocket( Logger logger ) {
+		this.logger = logger;
+		this.connection = null;
+		this.generateGuid();
+	}
 
 	// ================================ PUBLIC API ================================ //
 
