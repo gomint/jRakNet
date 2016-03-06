@@ -5,6 +5,7 @@ import java.net.DatagramPacket;
 import java.net.InetAddress;
 import java.net.MulticastSocket;
 import java.net.SocketException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * @author BlackyPaw
@@ -16,7 +17,11 @@ public class Test implements SocketEventHandler {
 		new Test();
 	}
 
+	private AtomicBoolean successPing = new AtomicBoolean( false );
+
 	public Test() {
+		System.out.println( (byte) 0x15 );
+
 		ClientConnection client = new ClientConnection();
 		try {
 			client.initialize();
@@ -26,13 +31,18 @@ public class Test implements SocketEventHandler {
 
 		client.setEventHandler( this );
 
-		while ( true ) {
+		while ( !successPing.get() ) {
 			client.pingUnconnected( "127.0.0.1", 19132 );
+
 			try {
 				Thread.sleep( 1000 );
 			} catch ( InterruptedException e ) {
 				e.printStackTrace();
 			}
+		}
+
+		if ( successPing.get() ) {
+			client.connect( "127.0.0.1", 19132 );
 		}
 	}
 
@@ -42,6 +52,7 @@ public class Test implements SocketEventHandler {
 			case UNCONNECTED_PONG:
 				SocketEvent.PingPongInfo ping = event.getPingPongInfo();
 				System.out.println( "Received unconnected pong: " + ping.getMotd() );
+				successPing.set( true );
 				break;
 			case CONNECTION_ATTEMPT_FAILED:
 				System.out.println( "Connection attempt failed: " + event.getReason() );
