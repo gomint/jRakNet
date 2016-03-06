@@ -859,7 +859,7 @@ public class ClientConnection implements Socket, Connection {
 			}
 
 			EncapsulatedPacket copy = new EncapsulatedPacket( packet );
-			copy.setPacketData( Arrays.copyOfRange( packet.getPacketData(), cursor, count ) );
+			copy.setPacketData( Arrays.copyOfRange( packet.getPacketData(), cursor, cursor + count ) );
 			copy.setSplitPacketId( splitPacketID );
 			copy.setSplitPacketIndex( splitPacketIndex );
 			copy.setSplitPacketCount( splitPacketCount );
