@@ -3,11 +3,9 @@ package io.gomint.jraknet;
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.InetAddress;
-import java.net.InterfaceAddress;
 import java.net.MulticastSocket;
-import java.net.NetworkInterface;
 import java.net.SocketException;
-import java.util.Enumeration;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * @author BlackyPaw
@@ -19,19 +17,10 @@ public class Test implements SocketEventHandler {
 		new Test();
 	}
 
-	public Test() {
-		/*
-		ServerSocket server = new ServerSocket( 10 );
-		try {
-			server.bind( "127.0.0.1", 19132 );
-		} catch ( SocketException e ) {
-			e.printStackTrace();
-		}
+	private AtomicBoolean successPing = new AtomicBoolean( false );
 
-		while ( true ) {
-			;
-		}
-		*/
+	public Test() {
+		System.out.println( (byte) 0x15 );
 
 		ClientConnection client = new ClientConnection();
 		try {
@@ -42,34 +31,18 @@ public class Test implements SocketEventHandler {
 
 		client.setEventHandler( this );
 
-		while ( true ) {
-			client.pingUnconnected( "255.255.255.255", 19132 );
-			try {
-				Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
-				while ( interfaces.hasMoreElements() ) {
-					NetworkInterface networkInterface = interfaces.nextElement();
+		while ( !successPing.get() ) {
+			client.pingUnconnected( "127.0.0.1", 19132 );
 
-					if ( !networkInterface.isUp() ) {
-						continue;
-					}
-
-					for ( InterfaceAddress interfaceAddress : networkInterface.getInterfaceAddresses() ) {
-						InetAddress broadcast = interfaceAddress.getBroadcast();
-						if ( broadcast == null ) {
-							continue;
-						}
-
-						client.pingUnconnected( broadcast, 19132 );
-					}
-				}
-			} catch ( SocketException e ) {
-				e.printStackTrace();
-			}
 			try {
 				Thread.sleep( 1000 );
 			} catch ( InterruptedException e ) {
 				e.printStackTrace();
 			}
+		}
+
+		if ( successPing.get() ) {
+			client.connect( "127.0.0.1", 19132 );
 		}
 	}
 
@@ -79,6 +52,7 @@ public class Test implements SocketEventHandler {
 			case UNCONNECTED_PONG:
 				SocketEvent.PingPongInfo ping = event.getPingPongInfo();
 				System.out.println( "Received unconnected pong: " + ping.getMotd() );
+				successPing.set( true );
 				break;
 			case CONNECTION_ATTEMPT_FAILED:
 				System.out.println( "Connection attempt failed: " + event.getReason() );

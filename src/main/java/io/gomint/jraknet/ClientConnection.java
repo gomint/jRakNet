@@ -434,7 +434,6 @@ public class ClientConnection implements Socket, Connection {
 		}
 
 		packet.setReliability( reliability );
-
 		if ( packet.getPacketLength() > maxSize ) {
 			// Split up this packet:
 			this.splitPacket( packet );
@@ -521,12 +520,14 @@ public class ClientConnection implements Socket, Connection {
 				this.udpSocket.receive( datagram );
 
 				if ( datagram.getLength() == 0 ) {
-					return;
+					continue;
 				}
 
 				this.handleDatagram( datagram );
 			} catch ( IOException e ) {
 				e.printStackTrace();
+			} finally {
+				this.datagramPool.putBack( datagram );
 			}
 		}
 	}
@@ -627,9 +628,6 @@ public class ClientConnection implements Socket, Connection {
 	 * Initializes all internal structures that are quite memory-consuming.
 	 */
 	private void initializeConnectionStructures() {
-		this.hasGuid = false;
-		this.mtuSize = 0;
-		this.guid = 0L;
 		this.expectedReliableMessageNumber = 0;
 		this.nextDatagramSequenceNumber = 0;
 		this.expectedDatagramSequenceNumber = 0;
@@ -646,6 +644,7 @@ public class ClientConnection implements Socket, Connection {
 		for ( int i = 0; i < NUM_ORDERING_CHANNELS; ++i ) {
 			this.orderingHeaps[i] = new BinaryOrderingHeap();
 		}
+
 		this.splitPacketChannels = new HashMap<>();
 		this.receiveBuffer = new LinkedList<>();
 		this.sendBuffer = new LinkedList<>();
@@ -731,6 +730,8 @@ public class ClientConnection implements Socket, Connection {
 	private void handleDatagram( DatagramPacket datagram ) {
 		// Test for unconnected packet IDs:
 		byte packetId = datagram.getData()[0];
+
+		System.out.println( "Received PacketID: " + packetId );
 
 		// Handle unconnected pings immediately:
 		if ( packetId == UNCONNECTED_PONG ) {
@@ -831,7 +832,8 @@ public class ClientConnection implements Socket, Connection {
 		this.mtuSize = buffer.readUShort();                     // MTU Size
 		boolean securityEnabled = buffer.readBoolean();         // Security Enabled
 
-		if ( securityEnabled ) {
+		System.out.println( "Server wants to enable security: " + securityEnabled );
+		/* if ( securityEnabled ) {
 			// We don't support security:
 			this.state = ConnectionState.UNCONNECTED;
 			if ( this.eventHandler != null ) {
@@ -839,7 +841,7 @@ public class ClientConnection implements Socket, Connection {
 				this.eventHandler.onSocketEvent( this, event );
 			}
 			return;
-		}
+		} */
 
 		this.initializeConnectionStructures();
 		this.remoteAddress = datagram.getSocketAddress();
@@ -1068,6 +1070,8 @@ public class ClientConnection implements Socket, Connection {
 
 		// Handle special internal packets:
 		byte packetId = packet.getPacketData()[0];
+		System.out.println( packetId );
+
 		switch ( packetId ) {
 			case CONNECTED_PONG:
 				this.handleConnectedPong( packet );
@@ -1286,6 +1290,8 @@ public class ClientConnection implements Socket, Connection {
 		String password = ...;
 		buffer.writeBytes( password.getBytes( StandardCharsets.US_ASCII ) );
 		*/
+
+		System.out.println( "Sending Connectionrequest" );
 
 		this.send( PacketReliability.RELIABLE_ORDERED, 0, buffer.getBuffer(), buffer.getBufferOffset(), buffer.getPosition() );
 	}
