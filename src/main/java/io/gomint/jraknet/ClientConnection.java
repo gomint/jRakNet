@@ -498,7 +498,7 @@ public class ClientConnection implements Socket, Connection {
 			}
 
 			// Update this connection:
-			if ( this.lastReceivedPacket + CONNECTION_TIMEOUT_MILLIS < start ) {
+			if ( this.state.isReliable() && this.lastReceivedPacket + CONNECTION_TIMEOUT_MILLIS < start ) {
 				this.disconnectMessage = "Connection timed out";
 				this.state = ConnectionState.UNCONNECTED;
 				if ( this.eventHandler != null ) {
@@ -1007,7 +1007,6 @@ public class ClientConnection implements Socket, Connection {
 		this.mtuSize = buffer.readUShort();                     // MTU Size
 		boolean securityEnabled = buffer.readBoolean();         // Security Enabled
 
-		System.out.println( "Server wants to enable security: " + securityEnabled );
 		/* if ( securityEnabled ) {
 			// We don't support security:
 			this.state = ConnectionState.UNCONNECTED;
@@ -1245,7 +1244,6 @@ public class ClientConnection implements Socket, Connection {
 
 		// Handle special internal packets:
 		byte packetId = packet.getPacketData()[0];
-		System.out.println( packetId );
 
 		switch ( packetId ) {
 			case CONNECTED_PONG:
@@ -1465,8 +1463,6 @@ public class ClientConnection implements Socket, Connection {
 		String password = ...;
 		buffer.writeBytes( password.getBytes( StandardCharsets.US_ASCII ) );
 		*/
-
-		System.out.println( "Sending Connectionrequest" );
 
 		this.send( PacketReliability.RELIABLE_ORDERED, 0, buffer.getBuffer(), buffer.getBufferOffset(), buffer.getPosition() - buffer.getBufferOffset() );
 	}
