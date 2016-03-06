@@ -1,8 +1,5 @@
 package io.gomint.jraknet;
 
-import io.gomint.jraknet.datastructures.FreeListObjectPool;
-import io.gomint.jraknet.datastructures.InstanceCreator;
-import io.gomint.jraknet.datastructures.ObjectPool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -16,12 +13,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
-import java.util.Random;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static io.gomint.jraknet.RakNetConstraints.*;
 
@@ -29,47 +20,52 @@ import static io.gomint.jraknet.RakNetConstraints.*;
  * @author BlackyPaw
  * @version 1.0
  */
-public class ServerSocket implements Socket {
-
-	private static final Random random = new Random();
+public class ServerSocket extends Socket {
 
 	// Logging
-	private final Logger logger = LoggerFactory.getLogger( ServerSocket.class );
+	private final Logger logger;
 
 	// Address the socket was bound to if already bound:
 	private InetSocketAddress bindAddress;
-	private DatagramSocket udpSocket;
-
-	// Threads used for modeling network "events"
-	private ThreadFactory eventLoopFactory;
-	private Thread        receiveThread;
-	private Thread        updateThread;
-
-	// Lifecycle
-	private AtomicBoolean running = new AtomicBoolean( false );
-	private SocketEventHandler eventHandler;
-
-	// Object-Pooling for vast instance created objects:
-	private ObjectPool<DatagramPacket> datagramPool;
 
 	// RakNet data:
-	private int                                  maxConnections;
-	private long                                 guid;
-	private Map<SocketAddress, ServerConnection> connectionsByAddress;
-	private Map<Long, ServerConnection>          connectionsByGuid;
-	private int                                  currentConnections;
-	private BlockingQueue<DatagramPacket>        incomingDatagrams;
+	private final int                                  maxConnections;
+	private       Map<SocketAddress, ServerConnection> connectionsByAddress;
+	private       Map<Long, ServerConnection>          connectionsByGuid;
+	private       int                                  currentConnections;
 
 	// MOTD-Workaround for Mojang MOTD:
 	private String motd;
-	private byte[] motdBytes;
 
+	/**
+	 * Constructs a new server socket which will allow for maxConnections concurrently playing
+	 * players at max.
+	 *
+	 * @param maxConnections The maximum connections allowed on this socket
+	 */
 	public ServerSocket( int maxConnections ) {
+		this.logger = LoggerFactory.getLogger( ServerSocket.class );
 		this.maxConnections = maxConnections;
 		this.currentConnections = 0;
 		this.setMotd( "GoMint" );
 		this.generateGuid();
 	}
+
+	/**
+	 * Constructs a new server socket which will allow for maxConnections concurrently playing
+	 * players at max. Also it will use the specified logger for all logging it performs.
+	 *
+	 * @param maxConnections The maximum connections allowed on this socket
+	 */
+	public ServerSocket( Logger logger, int maxConnections ) {
+		this.logger = logger;
+		this.maxConnections = maxConnections;
+		this.currentConnections = 0;
+		this.setMotd( "GoMint" );
+		this.generateGuid();
+	}
+
+	// ================================ PUBLIC API ================================ //
 
 	/**
 	 * Sets the MOTD to be sent inside ping packets.
@@ -78,9 +74,6 @@ public class ServerSocket implements Socket {
 	 */
 	public void setMotd( String motd ) {
 		this.motd = motd;
-
-		String formatted = String.format( MOTD_FORMAT, this.motd, 0, 10 );
-		this.motdBytes = formatted.getBytes( StandardCharsets.US_ASCII );
 	}
 
 	/**
@@ -93,49 +86,7 @@ public class ServerSocket implements Socket {
 	}
 
 	/**
-	 * Generates the server's globally unique identifier.
-	 */
-	private void generateGuid() {
-		// Maybe use more sophisticated method here sometime:
-		this.guid = random.nextLong();
-	}
-
-	/**
-	 * Sets the event loop factory to be used for internal threads.
-	 * <p>
-	 * Must be set before the socket is bound otherwise the call will result in an
-	 * IllegalStateException.
-	 *
-	 * @param factory The factory to be used to create internal threads
-	 */
-	public void setEventLoopFactory( ThreadFactory factory ) {
-		if ( this.isBound() ) {
-			throw new IllegalStateException( "Cannot set event loop factory after socket is already bound" );
-		}
-		this.eventLoopFactory = factory;
-	}
-
-	/**
-	 * Sets the event handler that will be notified of any interesting events
-	 * occurring on this socket.
-	 *
-	 * @param handler The handler to be notified of any events on this socket
-	 */
-	public void setEventHandler( SocketEventHandler handler ) {
-		this.eventHandler = handler;
-	}
-
-	/**
-	 * Checks whether or not the server socket has already been bound
-	 *
-	 * @return Whether or not the socket has already been bound
-	 */
-	public boolean isBound() {
-		return ( this.udpSocket != null );
-	}
-
-	/**
-	 * Binds the server socket to the specified port.
+	 * Binds the server socket to the specified port. This operation initializes this socket.
 	 *
 	 * @param host The hostname to bind to (either an IP or a FQDN)
 	 * @param port The port to bind to
@@ -147,7 +98,7 @@ public class ServerSocket implements Socket {
 	}
 
 	/**
-	 * Binds the server socket to the specified address.
+	 * Binds the server socket to the specified address. This operation initializes this socket.
 	 *
 	 * @param address The address to bind the port to
 	 *
@@ -164,59 +115,133 @@ public class ServerSocket implements Socket {
 
 		// Initialize other subsystems; won't get here if bind fails as DatagramSocket's
 		// constructor will throw SocketException:
-		this.running.set( true );
-		this.initializeEventLoopFactory();
-		this.createObjectPools();
-		this.initializeStructures();
-		this.startReceiveThread();
-		this.startUpdateThread();
+		this.afterInitialize();
+
+		this.connectionsByAddress = new HashMap<>( this.maxConnections );
+		this.connectionsByGuid = new HashMap<>( this.maxConnections );
 	}
 
 	/**
-	 * Closes the server socket if it has been bound before and cleans up
-	 * all underlying resources.
-	 */
-	public void close() {
-		// Stop all threads safely:
-		this.running.set( false );
-		try {
-			this.updateThread.join();
-		} catch ( InterruptedException ignored ) {
-			// ._.
-		} finally {
-			this.updateThread = null;
-		}
-
-		try {
-			this.receiveThread.join();
-		} catch ( InterruptedException ignored ) {
-			// ._.
-		} finally {
-			this.receiveThread = null;
-		}
-
-		// Delete internal data:
-		this.currentConnections = 0;
-
-		// Destroy object pools:
-		this.datagramPool = null;
-
-		// Close the UDP socket:
-		this.udpSocket.close();
-	}
-
-	/**
-	 * Gets the server's RakNet globally unique identifier.
+	 * Gets the address the socket is bound to if it is already bound.
 	 *
-	 * @return The server's globally unique identifier for RakNet
+	 * @return The address the socket is bound to or null if it is not bound yet
 	 */
-	long getGuid() {
-		return this.guid;
+	public SocketAddress getBindAddress() {
+		return this.bindAddress;
 	}
 
-	Logger getLogger() {
+	/**
+	 * Closes the socket and cleans up all internal resources. If any other method is invoked on this
+	 * socket after a call to this method was made the behaviour of the socket is undefined.
+	 */
+	@Override
+	public void close() {
+		super.close();
+		this.bindAddress = null;
+	}
+
+	// ================================ IMPLEMENTATION HOOKS ================================ //
+
+	/**
+	 * Gets a logger to be used for logging errors and warnings.
+	 *
+	 * @return The logger to be used for logging errors and warnings
+	 */
+	@Override
+	protected Logger getImplementationLogger() {
 		return this.logger;
 	}
+
+	/**
+	 * Invoked right after a datagram was received. This method may perform very rudimentary
+	 * datagram handling if necessary.
+	 *
+	 * @param datagram The datagram that was just received
+	 *
+	 * @return Whether or not the datagram was handled by this method already and should be processed no further
+	 */
+	@Override
+	protected boolean receiveDatagram( DatagramPacket datagram ) {
+		// Handle unconnected pings:
+		byte packetId = datagram.getData()[0];
+		if ( packetId == UNCONNECTED_PING ) {
+			this.handleUnconnectedPing( datagram );
+			return true;
+		}
+		return false;
+	}
+
+	/**
+	 * Handles the given datagram. This will be invoked on the socket's update thread and should hand
+	 * this datagram to the connection it belongs to in order to deserialize it appropriately.
+	 *
+	 * @param datagram The datagram to be handled
+	 * @param time     The current system time
+	 */
+	@Override
+	protected void handleDatagram( DatagramPacket datagram, long time ) {
+		this.getConnection( datagram.getSocketAddress() ).handleDatagram( datagram, time );
+	}
+
+	/**
+	 * Updates all connections this socket created.
+	 *
+	 * @param time The current system time
+	 */
+	@Override
+	protected void updateConnections( long time ) {
+		// Update all connections:
+		Iterator<Map.Entry<SocketAddress, ServerConnection>> it = this.connectionsByAddress.entrySet().iterator();
+		while ( it.hasNext() ) {
+			ServerConnection connection = it.next().getValue();
+			if ( connection.getLastReceivedPacketTime() + CONNECTION_TIMEOUT_MILLIS < time ) {
+				connection.notifyTimeout();
+				it.remove();
+				if ( connection.hasGuid() ) {
+					this.connectionsByGuid.remove( connection.getGuid() );
+				}
+
+				if ( connection.isConnected() ) {
+					--this.currentConnections;
+				}
+			} else {
+				if ( !connection.update( time ) ) {
+					it.remove();
+					if ( connection.hasGuid() ) {
+						this.connectionsByGuid.remove( connection.getGuid() );
+					}
+				}
+			}
+		}
+	}
+
+	/**
+	 * Invoked after the receive thread was stopped but right before it terminates. May perform any necessary
+	 * cleanup.
+	 */
+	@Override
+	protected void cleanupReceiveThread() {
+
+	}
+
+	/**
+	 * Invoked after the update thread was stopped but right before it terminates. May perform any necessary
+	 * cleanup.
+	 */
+	@Override
+	protected void cleanupUpdateThread() {
+		// Disconnect all connections lingering around:
+		long time = System.currentTimeMillis();
+		for ( ServerConnection connection : this.connectionsByAddress.values() ) {
+			connection.disconnect( "Server is closing" );
+			connection.update( time );
+		}
+		this.connectionsByAddress = null;
+		this.connectionsByGuid.clear();
+		this.connectionsByGuid = null;
+	}
+
+	// ================================ INTERNALS ================================ //
 
 	/**
 	 * Checks whether or not another connection with this address's system address or
@@ -276,6 +301,7 @@ public class ServerSocket implements Socket {
 	 * a fully valid current connection.
 	 *
 	 * @param connection The connection that received the final connection request
+	 *
 	 * @return Whether or not the connection request should be accepted.
 	 */
 	boolean notifyConnectionRequest( ServerConnection connection ) {
@@ -295,11 +321,8 @@ public class ServerSocket implements Socket {
 	 * @param connection The connection that is fully established now
 	 */
 	void propagateFullyConnectedConnection( ServerConnection connection ) {
-		if ( this.eventHandler != null ) {
-			this.logger.info( "Fully established new incoming connection: " + connection.getAddress() );
-			SocketEvent event = new SocketEvent( SocketEvent.Type.NEW_INCOMING_CONNECTION, connection );
-			this.eventHandler.onSocketEvent( this, event );
-		}
+		this.logger.info( "Fully established new incoming connection: " + connection.getAddress() );
+		this.propagateEvent( new SocketEvent( SocketEvent.Type.NEW_INCOMING_CONNECTION, connection ) );
 	}
 
 	/**
@@ -308,15 +331,12 @@ public class ServerSocket implements Socket {
 	 * @param connection The connection that got disconnected
 	 */
 	void propagateConnectionClosed( ServerConnection connection ) {
-		if ( this.eventHandler != null ) {
-			if ( connection.isConnected() ) {
-				// Got to handle this disconnect:
-				this.removeActiveConnection( connection );
-			}
-
-			SocketEvent event = new SocketEvent( SocketEvent.Type.CONNECTION_CLOSED, connection );
-			this.eventHandler.onSocketEvent( this, event );
+		if ( connection.isConnected() ) {
+			// Got to handle this disconnect:
+			this.removeActiveConnection( connection );
 		}
+
+		this.propagateEvent( new SocketEvent( SocketEvent.Type.CONNECTION_CLOSED, connection ) );
 	}
 
 	/**
@@ -325,39 +345,12 @@ public class ServerSocket implements Socket {
 	 * @param connection The connection that disconnected
 	 */
 	void propagateConnectionDisconnected( ServerConnection connection ) {
-		if ( this.eventHandler != null ) {
-			if ( connection.isConnected() ) {
-				// Got to handle this disconnect:
-				this.removeActiveConnection( connection );
-			}
-
-			SocketEvent event = new SocketEvent( SocketEvent.Type.CONNECTION_DISCONNECTED, connection );
-			this.eventHandler.onSocketEvent( this, event );
-		}
-	}
-
-	/**
-	 * Handles the specified datagram by decomposing all encapsulated packets.
-	 *
-	 * @param datagram The datagram to handle
-	 */
-	private void handleDatagram( DatagramPacket datagram ) {
-		// Test for unconnected packet IDs:
-		byte packetId = datagram.getData()[0];
-
-		// Handle unconnected pings immediately:
-		if ( packetId == UNCONNECTED_PING ) {
-			this.handleUnconnectedPing( datagram );
-			this.datagramPool.putBack( datagram );
-			return;
+		if ( connection.isConnected() ) {
+			// Got to handle this disconnect:
+			this.removeActiveConnection( connection );
 		}
 
-		// Push datagram to update queue:
-		try {
-			this.incomingDatagrams.put( datagram );
-		} catch ( InterruptedException e ) {
-			this.logger.error( "Failed to handle incoming datagram", e );
-		}
+		this.propagateEvent( new SocketEvent( SocketEvent.Type.CONNECTION_DISCONNECTED, connection ) );
 	}
 
 	/**
@@ -379,13 +372,14 @@ public class ServerSocket implements Socket {
 		                      ( (long) buffer[index++] << 8 ) |
 		                      ( (long) buffer[index] ) );
 
-		PacketBuffer packet = new PacketBuffer( 35 + this.motdBytes.length );
+		byte[] motdBytes = String.format( MOTD_FORMAT, this.motd, this.currentConnections, this.maxConnections ).getBytes( StandardCharsets.US_ASCII );
+		PacketBuffer packet = new PacketBuffer( 35 + motdBytes.length );
 		packet.writeByte( UNCONNECTED_PONG );
 		packet.writeLong( sendPingTime );
-		packet.writeLong( this.guid );
+		packet.writeLong( this.getGuid() );
 		packet.writeOfflineMessageDataId();
-		packet.writeUShort( this.motdBytes.length );
-		packet.writeBytes( this.motdBytes );
+		packet.writeUShort( motdBytes.length );
+		packet.writeBytes( motdBytes );
 		try {
 			this.send( datagram.getSocketAddress(), packet );
 		} catch ( IOException ignored ) {
@@ -399,185 +393,17 @@ public class ServerSocket implements Socket {
 	 *
 	 * @param connection The connection to remove
 	 */
-	private void removeActiveConnection( ServerConnection connection ) {
+	private void removeActiveConnection( @SuppressWarnings( "unused" ) ServerConnection connection ) {
 		--this.currentConnections;
 	}
 
 	/**
-	 * Updates all connection that belong to this server socket.
+	 * Gets or creates a connection given its socket address. Must only be invoked in update thread in order
+	 * to ensure thread safety.
+	 *
+	 * @param address The address of the connection to get
+	 * @return The connection of the given address
 	 */
-	private void update() {
-		long start;
-		while ( this.running.get() ) {
-			start = System.currentTimeMillis();
-
-			// Handle all incoming datagrams:
-			DatagramPacket datagram;
-			while( !this.incomingDatagrams.isEmpty() ) {
-				try {
-					datagram = this.incomingDatagrams.take();
-					this.getConnection( datagram.getSocketAddress() ).handleDatagram( datagram, start );
-					this.datagramPool.putBack( datagram );
-				} catch ( InterruptedException e ) {
-					this.logger.error( "Failed to handle incoming datagram", e );
-				}
-			}
-
-			// Update all connections:
-			Iterator<Map.Entry<SocketAddress, ServerConnection>> it = this.connectionsByAddress.entrySet().iterator();
-			while ( it.hasNext() ) {
-				ServerConnection connection = it.next().getValue();
-				if ( connection.getLastReceivedPacketTime() + CONNECTION_TIMEOUT_MILLIS < start ) {
-					connection.notifyTimeout();
-					it.remove();
-					if ( connection.hasGuid() ) {
-						this.connectionsByGuid.remove( connection.getGuid() );
-					}
-
-					if ( connection.isConnected() ) {
-						--this.currentConnections;
-					}
-				} else {
-					if ( !connection.update( start ) ) {
-						it.remove();
-						if ( connection.hasGuid() ) {
-							this.connectionsByGuid.remove( connection.getGuid() );
-						}
-					}
-				}
-			}
-
-			long end = System.currentTimeMillis();
-
-			if ( end - start < 10L ) { // Update 100 times per second if possible
-				try {
-					Thread.sleep( 10L - ( end - start ) );
-				} catch ( InterruptedException ignored ) {
-					// ._.
-				}
-			}
-		}
-
-		// Disconnect all connections lingering around:
-		start = System.currentTimeMillis();
-		for ( ServerConnection connection : this.connectionsByAddress.values() ) {
-			connection.disconnect( "Server is closing" );
-			connection.update( start );
-		}
-		this.connectionsByAddress = null;
-		this.connectionsByGuid.clear();
-		this.connectionsByGuid = null;
-	}
-
-	/**
-	 * Polls the socket's internal datagram socket and pushes off any received datagrams
-	 * to dedicated handlers that will decode the datagram into actual data packets.
-	 */
-	private void pollUdpSocket() {
-		while ( this.running.get() ) {
-			DatagramPacket datagram = this.datagramPool.allocate();
-			try {
-				this.udpSocket.receive( datagram );
-
-				if ( datagram.getLength() == 0 ) {
-					this.datagramPool.putBack( datagram );
-					continue;
-				}
-
-				this.handleDatagram( datagram );
-			} catch ( IOException e ) {
-				e.printStackTrace();
-			}
-		}
-	}
-
-	/**
-	 * Initializes the socket's event loop factory if it does not yet have one set.
-	 */
-	private void initializeEventLoopFactory() {
-		if ( this.eventLoopFactory != null ) {
-			return;
-		}
-
-		// Construct default event loop factory:
-		this.eventLoopFactory = new ThreadFactory() {
-			private ThreadGroup group = new ThreadGroup( "jRakNet-ServerSocket" );
-			private AtomicInteger id = new AtomicInteger( 0 );
-
-			public Thread newThread( Runnable r ) {
-				return new Thread( this.group, r, "EventLoop-" + Integer.toString( id.incrementAndGet() ) );
-			}
-		};
-	}
-
-	/**
-	 * Creates all object pools used internally for reducing the number of created instances
-	 * of certain objects.
-	 */
-	private void createObjectPools() {
-		this.datagramPool = new FreeListObjectPool<>( new InstanceCreator<DatagramPacket>() {
-			public DatagramPacket createInstance( ObjectPool<DatagramPacket> pool ) {
-				// We allocate buffers able to hold twice the maximum MTU size for the reasons listed below:
-				//
-				// Somehow I noticed receiving datagrams that exceeded their respective connection's MTU by
-				// far whenever they contained a Batch Packet. As this behaviour comes out of seemingly
-				// nowhere yet we do need to receive these batch packets we must have room enough to actually
-				// gather all this data even though it does not seem legit to allocate larger buffers for this
-				// reason. But as the underlying DatagramSocket provides no way of grabbing the minimum required
-				// buffer size for the datagram we are forced to play this dirty trick. If - at any point in the
-				// future - this behaviour changes, please add this buffer size back to its original value:
-				// MAXIMUM_MTU_SIZE.
-				//
-				// Examples of too large datagrams:
-				//  - Datagram containing BatchPacket for LoginPacket: 1507 bytes the batch packet alone (5th of March 2016)
-				//
-				// Suggestions:
-				//  - Make this value configurable in order to easily adjust this value whenever necessary
-				final int INTERNAL_BUFFER_SIZE = MAXIMUM_MTU_SIZE << 1;
-
-				return new DatagramPacket( new byte[INTERNAL_BUFFER_SIZE], INTERNAL_BUFFER_SIZE );
-			}
-		} );
-	}
-
-	/**
-	 * Initializes any sort of structures that are required internally.
-	 */
-	private void initializeStructures() {
-		this.connectionsByAddress = new HashMap<>( this.maxConnections );
-		this.connectionsByGuid = new HashMap<>( this.maxConnections );
-		this.incomingDatagrams = new LinkedBlockingQueue<>( 512 );
-	}
-
-	/**
-	 * Starts the thread that will continuously poll the UDP socket for incoming
-	 * datagrams.
-	 */
-	private void startReceiveThread() {
-		this.receiveThread = this.eventLoopFactory.newThread( new Runnable() {
-			public void run() {
-				ServerSocket.this.pollUdpSocket();
-			}
-		} );
-
-		this.receiveThread.start();
-	}
-
-	/**
-	 * Starts the thread that will continuously update all currently connected player's
-	 * connections.
-	 */
-	private void startUpdateThread() {
-		this.updateThread = this.eventLoopFactory.newThread( new Runnable() {
-			@Override
-			public void run() {
-				ServerSocket.this.update();
-			}
-		} );
-
-		this.updateThread.start();
-	}
-
 	private ServerConnection getConnection( SocketAddress address ) {
 		ServerConnection connection = this.connectionsByAddress.get( address );
 		if ( connection == null ) {
