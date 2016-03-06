@@ -662,6 +662,10 @@ public class ClientConnection implements Socket, Connection {
 
 				this.lastSentPacket = time;
 				++this.nextDatagramSequenceNumber;
+
+				if ( i + 1 < this.sendListIndices.size() ) {
+					buffer = new PacketBuffer( this.mtuSize );
+				}
 			}
 
 			this.sendList.clear();

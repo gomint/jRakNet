@@ -414,6 +414,9 @@ class ServerConnection implements Connection {
 				}
 
 				++this.nextDatagramSequenceNumber;
+				if ( i + 1 < this.sendListIndices.size() ) {
+					buffer = new PacketBuffer( this.mtuSize );
+				}
 			}
 
 			this.sendList.clear();
