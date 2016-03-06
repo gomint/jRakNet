@@ -6,7 +6,21 @@
 
     <groupId>io.gomint</groupId>
     <artifactId>jraknet</artifactId>
-    <version>1.1.0</version>
+    <version>1.2.0</version>
+
+    <!-- Distribution Management -->
+    <distributionManagement>
+        <repository>
+            <id>gomint-repo</id>
+            <name>GoMint Release Repository</name>
+            <url>https://repo.gomint.io/content/repositories/releases/</url>
+        </repository>
+        <snapshotRepository>
+            <id>gomint-snapshots</id>
+            <name>GoMint Snapshot Repository</name>
+            <url>https://repo.gomint.io/content/repositories/snapshots/</url>
+        </snapshotRepository>
+    </distributionManagement>
 
     <dependencies>
         <dependency>
