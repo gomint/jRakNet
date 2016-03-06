@@ -12,7 +12,7 @@ import static io.gomint.jraknet.RakNetConstraints.*;
  * @author BlackyPaw
  * @version 1.0
  */
-public class ClientConnection extends Connection {
+class ClientConnection extends Connection {
 
 	// References
 	private final ClientSocket client;
