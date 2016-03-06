@@ -78,6 +78,7 @@ public class ClientConnection implements Socket, Connection {
 	private int     mtuSize;
 
 	private long lastReceivedPacket;
+	private long lastSentPacket;
 
 	// Congestion Management
 	private int      expectedReliableMessageNumber;
@@ -120,6 +121,7 @@ public class ClientConnection implements Socket, Connection {
 	public ClientConnection() {
 		this.state = ConnectionState.UNCONNECTED;
 		this.lastReceivedPacket = System.currentTimeMillis();
+		this.lastSentPacket = this.lastReceivedPacket;
 		this.hasGuid = false;
 		this.mtuSize = 0;
 		this.guid = 0L;
@@ -496,6 +498,20 @@ public class ClientConnection implements Socket, Connection {
 			}
 
 			// Update this connection:
+			if ( this.lastReceivedPacket + CONNECTION_TIMEOUT_MILLIS < start ) {
+				this.disconnectMessage = "Connection timed out";
+				this.state = ConnectionState.UNCONNECTED;
+				if ( this.eventHandler != null ) {
+					SocketEvent event = new SocketEvent( SocketEvent.Type.CONNECTION_CLOSED, this );
+					this.eventHandler.onSocketEvent( this, event );
+				}
+			} else {
+				// Send connected ping if necessary:
+				if ( this.isConnected() && this.lastSentPacket + 2000L < start ) {
+					this.sendConnectedPing( start );
+				}
+				this.updateConnection( start );
+			}
 
 			long end = System.currentTimeMillis();
 
@@ -507,6 +523,167 @@ public class ClientConnection implements Socket, Connection {
 				}
 			}
 		}
+	}
+
+
+	private boolean updateConnection( long time ) {
+		if ( !this.state.isReliable() ) {
+			return true;
+		}
+
+		this.sendACKs();
+		this.sendNAKs();
+
+		int currentDatagramSize = 0;
+		int maxDatagramSize     = this.mtuSize - DATA_HEADER_BYTE_LENGTH;
+
+		// Resend everything scheduled for resend:
+		while ( !this.resendQueue.isEmpty() ) {
+			EncapsulatedPacket packet = this.resendQueue.peek();
+			if ( packet.getNextInteraction() <= time ) {
+
+				// Delete packets marked for removal:
+				if ( packet.getNextInteraction() == 0L ) {
+					this.resendQueue.poll();
+					continue;
+				}
+
+				// Push current datagram to send queue if adding this packet would exceed the MTU:
+				int length = packet.getHeaderLength() + packet.getPacketLength();
+				if ( currentDatagramSize + length > maxDatagramSize ) {
+					// Push datagram:
+					this.sendListIndices.add( this.sendList.size() );
+					currentDatagramSize = 0;
+				}
+
+				this.resendQueue.poll();
+				packet.setNextInteraction( time + this.resendTimeout );
+
+				this.sendList.add( packet );
+				packet.incrementSendCount();
+				currentDatagramSize += length;
+
+				// Insert back into resend queue:
+				this.resendQueue.add( packet );
+			} else {
+				break;
+			}
+		}
+
+		// Attempt to send new packets:
+		synchronized ( this.sendBuffer ) {
+			while ( !this.sendBuffer.isEmpty() && this.resendBuffer.get( this.nextReliableMessageNumber ) == null ) {
+				EncapsulatedPacket packet = this.sendBuffer.poll();
+
+				// Push current datagram to send queue if adding this packet would exceed the MTU:
+				int length = packet.getHeaderLength() + packet.getPacketLength();
+				if ( currentDatagramSize + length > maxDatagramSize ) {
+					// Push datagram:
+					this.sendListIndices.add( this.sendList.size() );
+					currentDatagramSize = 0;
+				}
+
+				PacketReliability reliability = packet.getReliability();
+				if ( reliability == PacketReliability.RELIABLE ||
+				     reliability == PacketReliability.RELIABLE_SEQUENCED ||
+				     reliability == PacketReliability.RELIABLE_ORDERED ) {
+					packet.setReliableMessageNumber( this.nextReliableMessageNumber );
+
+					// Insert into resend queue:
+					packet.setNextInteraction( time + this.resendTimeout );
+					this.resendQueue.add( packet );
+
+					// Add to FixedSize round-robin resend buffer:
+					this.resendBuffer.set( this.nextReliableMessageNumber, packet );
+
+					++this.nextReliableMessageNumber;
+				}
+
+				this.sendList.add( packet );
+				packet.incrementSendCount();
+				currentDatagramSize += length;
+			}
+		}
+
+		// Push the final datagram if any is to be pushed:
+		if ( currentDatagramSize > 0 ) {
+			this.sendListIndices.add( this.sendList.size() );
+		}
+
+		// Now finally build datagrams and send them out after all this surrounding handling:
+		if ( !this.sendListIndices.isEmpty() ) {
+			PacketBuffer        buffer = new PacketBuffer( this.mtuSize );
+			DatagramContentNode dcn    = null;
+
+			for ( int i = 0; i < this.sendListIndices.size(); ++i ) {
+				int min, max;
+
+				if ( i == 0 ) {
+					min = 0;
+					max = this.sendListIndices.get( i );
+				} else {
+					min = this.sendListIndices.get( i - 1 );
+					max = this.sendListIndices.get( i );
+				}
+
+				// Write datagram header:
+				byte flags = (byte) ( 0x80 | ( i > 0 ? 0x8 : 0x0 ) );     // IsValid | (isContinuousSend)
+				buffer.writeByte( flags );
+				buffer.writeTriad( this.nextDatagramSequenceNumber );
+
+				for ( int j = min; j < max; ++j ) {
+					EncapsulatedPacket packet = this.sendList.get( j );
+
+					// Add this packet to the datagram content buffer if reliable:
+					if ( packet.getReliability() != PacketReliability.UNRELIABLE && packet.getReliability() != PacketReliability.UNRELIABLE_SEQUENCED ) {
+						if ( dcn == null ) {
+							dcn = new DatagramContentNode( packet.getReliableMessageNumber() );
+							this.datagramContentBuffer.set( this.nextDatagramSequenceNumber, dcn );
+						} else {
+							dcn.setNext( new DatagramContentNode( packet.getReliableMessageNumber() ) );
+							dcn = dcn.getNext();
+						}
+					}
+
+					packet.writeToBuffer( buffer );
+				}
+
+				if ( dcn == null ) {
+					// TODO: Clear dcn here
+					this.datagramContentBuffer.set( this.nextDatagramSequenceNumber, null );
+				}
+
+				// Finally send this packet buffer to its destination:
+				try {
+					this.send( this.remoteAddress, buffer );
+				} catch ( IOException e ) {
+					this.logger.error( "Failed to send datagram to destination", e );
+				}
+
+				this.lastSentPacket = time;
+				++this.nextDatagramSequenceNumber;
+			}
+
+			this.sendList.clear();
+			this.sendListIndices.clear();
+		}
+
+		if ( this.state == ConnectionState.DISCONNECTING ) {
+			// Check if we can perform a clean disconnect now:
+			if ( this.resendQueue.isEmpty() && this.sendBuffer.isEmpty() ) {
+				this.state = ConnectionState.UNCONNECTED;
+				if ( this.eventHandler != null ) {
+					SocketEvent event = new SocketEvent( SocketEvent.Type.CONNECTION_DISCONNECTED, this );
+					this.eventHandler.onSocketEvent( this, event );
+				}
+				return false;
+			}
+
+			// Fake not timing out in order to fully send all packets still in queue:
+			this.lastReceivedPacket = time;
+		}
+
+		return true;
 	}
 
 	/**
@@ -730,8 +907,6 @@ public class ClientConnection implements Socket, Connection {
 	private void handleDatagram( DatagramPacket datagram ) {
 		// Test for unconnected packet IDs:
 		byte packetId = datagram.getData()[0];
-
-		System.out.println( "Received PacketID: " + packetId );
 
 		// Handle unconnected pings immediately:
 		if ( packetId == UNCONNECTED_PONG ) {
@@ -1293,7 +1468,15 @@ public class ClientConnection implements Socket, Connection {
 
 		System.out.println( "Sending Connectionrequest" );
 
-		this.send( PacketReliability.RELIABLE_ORDERED, 0, buffer.getBuffer(), buffer.getBufferOffset(), buffer.getPosition() );
+		this.send( PacketReliability.RELIABLE_ORDERED, 0, buffer.getBuffer(), buffer.getBufferOffset(), buffer.getPosition() - buffer.getBufferOffset() );
+	}
+
+	private void sendConnectedPing( long pingTime ) {
+		PacketBuffer buffer = new PacketBuffer( 9 );
+		buffer.writeByte( CONNECTED_PING );
+		buffer.writeLong( pingTime );
+
+		this.send( PacketReliability.RELIABLE, 0, buffer.getBuffer(), buffer.getBufferOffset(), buffer.getPosition() - buffer.getBufferOffset() );
 	}
 
 	private void sendDisconnectionNotification() {
