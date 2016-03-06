@@ -231,6 +231,23 @@ public class ClientConnection implements Socket, Connection {
 		this.sendUnconnectedPing( address );
 	}
 
+	/**
+	 * Sends an unconnected ping to the specified remote system. One must never assume that the ping packet will
+	 * reach its destination as it is transferred unreliably. If an unconnected pong packet is ever going to be
+	 * received an {@link io.gomint.jraknet.SocketEvent.Type#UNCONNECTED_PONG} event will be filled out and handed
+	 * to the socket's event handler.
+	 *
+	 * @param address The address of the target system
+	 * @param port The port of the target system
+	 */
+	public void pingUnconnected( InetAddress address, int port ) {
+		if ( !this.isInitialized() ) {
+			throw new IllegalStateException( "Cannot ping remote system without initializing connection first" );
+		}
+
+		this.sendUnconnectedPing( address, port );
+	}
+
 
 	// ============================================ SOCKET ============================================ //
 
