@@ -15,11 +15,11 @@
             <name>GoMint Release Repository</name>
             <url>https://repo.gomint.io/content/repositories/releases/</url>
         </repository>
-        <repository>
+        <snapshotRepository>
             <id>gomint-snapshots</id>
             <name>GoMint Snapshot Repository</name>
             <url>https://repo.gomint.io/content/repositories/snapshots/</url>
-        </repository>
+        </snapshotRepository>
     </distributionManagement>
 
     <dependencies>
