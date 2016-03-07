@@ -33,7 +33,7 @@ try {
 
 ## License
 
-jRakNet is distributed under the terms of the MIT license which may be found inside the LICENSE file
+jRakNet is distributed under the terms of the BSD license which may be found inside the LICENSE file
 inside the source tree's root directory.
 
 ## Documentation
