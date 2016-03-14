@@ -283,6 +283,7 @@ public abstract class Socket implements AutoCloseable {
 	private void startReceiveThread() {
 		this.receiveThread = this.eventLoopFactory.newThread( new Runnable() {
 			public void run() {
+                Thread.currentThread().setName( Thread.currentThread().getName() + "[jRaknet " + getClass().getSimpleName() + " Receive]" );
 				Socket.this.pollUdpSocket();
 			}
 		} );
@@ -298,6 +299,7 @@ public abstract class Socket implements AutoCloseable {
 		this.updateThread = this.eventLoopFactory.newThread( new Runnable() {
 			@Override
 			public void run() {
+                Thread.currentThread().setName( Thread.currentThread().getName() + "[jRaknet " + getClass().getSimpleName() + " Update]" );
 				Socket.this.update();
 			}
 		} );
