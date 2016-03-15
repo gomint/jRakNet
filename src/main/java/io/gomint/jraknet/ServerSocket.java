@@ -197,18 +197,18 @@ public class ServerSocket extends Socket {
 			if ( connection.getLastReceivedPacketTime() + CONNECTION_TIMEOUT_MILLIS < time ) {
 				connection.notifyTimeout();
 				it.remove();
+
 				if ( connection.hasGuid() ) {
 					this.connectionsByGuid.remove( connection.getGuid() );
-				}
-
-				if ( connection.isConnected() ) {
-					--this.currentConnections;
+                    --this.currentConnections;
 				}
 			} else {
 				if ( !connection.update( time ) ) {
 					it.remove();
+
 					if ( connection.hasGuid() ) {
 						this.connectionsByGuid.remove( connection.getGuid() );
+                        --this.currentConnections;
 					}
 				}
 			}
