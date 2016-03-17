@@ -112,7 +112,7 @@ public class EncapsulatedPacket {
 		}
 
 		// Sanity check for odd circumstances:
-		if ( packetLength == 0 || orderingChannel >= NUM_ORDERING_CHANNELS || ( isSplitPacket && splitPacketIndex >= splitPacketCount ) ) {
+		if ( packetLength <= 0 || orderingChannel >= NUM_ORDERING_CHANNELS || ( isSplitPacket && splitPacketIndex >= splitPacketCount ) ) {
 			// Datagram is malformed --> Discard
 			return false;
 		}
