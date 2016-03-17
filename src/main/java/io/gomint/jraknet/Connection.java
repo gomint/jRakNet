@@ -397,7 +397,7 @@ public abstract class Connection {
 	 *
 	 * @return Whether or not the datagram was handled already and should be processed no further
 	 */
-	protected abstract boolean handleDatagram0( DatagramPacket datagram, long time );
+	protected abstract boolean handleDatagram0( DatagramBuffer datagram, long time );
 
 	/**
 	 * Implementation hook.
@@ -731,7 +731,7 @@ public abstract class Connection {
 	 *
 	 * @param datagram The datagram that was received
 	 */
-	void handleDatagram( DatagramPacket datagram, long time ) {
+	void handleDatagram( DatagramBuffer datagram, long time ) {
 		this.lastReceivedPacket = time;
 
 		if ( !this.handleDatagram0( datagram, time ) ) {
@@ -867,14 +867,14 @@ public abstract class Connection {
 
 	// ================================ PACKET HANDLERS ================================ //
 
-	private void handleConnectedDatagram( DatagramPacket datagram ) {
+	private void handleConnectedDatagram( DatagramBuffer datagram ) {
 		if ( !this.state.isReliable() ) {
 			// This connection is not reliable --> internal structures might not have been initialized
 			return;
 		}
 
 		// Deserialize datagram header:
-		PacketBuffer buffer  = new PacketBuffer( datagram.getData(), datagram.getOffset() );
+		PacketBuffer buffer  = new PacketBuffer( datagram.getData(), 0 );
 		byte         flags   = buffer.readByte();
 		boolean      isValid = ( flags & 0x80 ) != 0;
 		if ( !isValid ) {
@@ -922,7 +922,7 @@ public abstract class Connection {
 		this.outgoingACKs.insert( datagramSequenceNumber );
 
 		EncapsulatedPacket packet = new EncapsulatedPacket();
-		while ( buffer.getPosition() - buffer.getBufferOffset() < datagram.getLength() && packet.readFromBuffer( buffer ) ) {
+		while ( buffer.getPosition() - buffer.getBufferOffset() < datagram.length() && packet.readFromBuffer( buffer ) ) {
 			if ( packet.isSplitPacket() ) {
 				packet = this.rebuildSplitPacket( packet );
 				if ( packet == null ) {

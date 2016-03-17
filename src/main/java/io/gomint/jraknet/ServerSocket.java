@@ -161,7 +161,7 @@ public class ServerSocket extends Socket {
 	 * @return Whether or not the datagram was handled by this method already and should be processed no further
 	 */
 	@Override
-	protected boolean receiveDatagram( DatagramPacket datagram ) {
+	protected boolean receiveDatagram( DatagramBuffer datagram ) {
 		// Handle unconnected pings:
 		byte packetId = datagram.getData()[0];
 		if ( packetId == UNCONNECTED_PING ) {
@@ -179,8 +179,8 @@ public class ServerSocket extends Socket {
 	 * @param time     The current system time
 	 */
 	@Override
-	protected void handleDatagram( DatagramPacket datagram, long time ) {
-		this.getConnection( datagram.getSocketAddress() ).handleDatagram( datagram, time );
+	protected void handleDatagram( DatagramBuffer datagram, long time ) {
+		this.getConnection( datagram.address() ).handleDatagram( datagram, time );
 	}
 
 	/**
@@ -358,11 +358,11 @@ public class ServerSocket extends Socket {
 	 *
 	 * @param datagram The datagram containing the ping request
 	 */
-	private void handleUnconnectedPing( DatagramPacket datagram ) {
+	private void handleUnconnectedPing( DatagramBuffer datagram ) {
 		// Indeed, rather ugly but avoids the relatively unnecessary cost of
 		// constructing yet another packet buffer instance:
 		byte[] buffer = datagram.getData();
-		int    index  = datagram.getOffset() + 1;
+		int    index  = 1;
 		long sendPingTime = ( ( (long) buffer[index++] << 56 ) |
 		                      ( (long) buffer[index++] << 48 ) |
 		                      ( (long) buffer[index++] << 40 ) |
@@ -381,7 +381,7 @@ public class ServerSocket extends Socket {
 		packet.writeUShort( motdBytes.length );
 		packet.writeBytes( motdBytes );
 		try {
-			this.send( datagram.getSocketAddress(), packet );
+			this.send( datagram.address(), packet );
 		} catch ( IOException ignored ) {
 			// ._.
 		}

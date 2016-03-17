@@ -160,7 +160,7 @@ public class ClientSocket extends Socket {
 	 * @return Whether or not the datagram was handled by this method already and should be processed no further
 	 */
 	@Override
-	protected boolean receiveDatagram( DatagramPacket datagram ) {
+	protected boolean receiveDatagram( DatagramBuffer datagram ) {
 		// Check if this might be an unconnected pong:
 		byte packetId = datagram.getData()[0];
 		if ( packetId == UNCONNECTED_PONG ) {
@@ -179,7 +179,7 @@ public class ClientSocket extends Socket {
 	 * @param time The current system time
 	 */
 	@Override
-	protected void handleDatagram( DatagramPacket datagram, long time ) {
+	protected void handleDatagram( DatagramBuffer datagram, long time ) {
 		if ( this.connection != null ) {
 			this.connection.handleDatagram( datagram, time );
 		}
@@ -318,8 +318,8 @@ public class ClientSocket extends Socket {
 	 *
 	 * @param datagram The datagram containing the unconnected pong packet
 	 */
-	private void handleUnconnectedPong( DatagramPacket datagram ) {
-		PacketBuffer buffer = new PacketBuffer( datagram.getData(), datagram.getOffset() );
+	private void handleUnconnectedPong( DatagramBuffer datagram ) {
+		PacketBuffer buffer = new PacketBuffer( datagram.getData(), 0 );
 		buffer.skip( 1 );                   // Packet ID
 
 		long   pingTime   = buffer.readLong();
@@ -333,7 +333,7 @@ public class ClientSocket extends Socket {
 			motd = new String( motdBytes, StandardCharsets.US_ASCII );
 		}
 
-		SocketEvent.PingPongInfo info = new SocketEvent.PingPongInfo( datagram.getSocketAddress(),
+		SocketEvent.PingPongInfo info = new SocketEvent.PingPongInfo( datagram.address(),
 		                                                              pingTime,
 		                                                              System.currentTimeMillis(),
 		                                                              serverGuid,

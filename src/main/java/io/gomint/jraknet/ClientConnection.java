@@ -71,7 +71,7 @@ class ClientConnection extends Connection {
 	}
 
 	@Override
-	protected boolean handleDatagram0( DatagramPacket datagram, long time ) {
+	protected boolean handleDatagram0( DatagramBuffer datagram, long time ) {
 		this.lastPingTime = time;
 
 		// Handle special internal packets:
@@ -129,11 +129,11 @@ class ClientConnection extends Connection {
 
 	// ================================ PACKET HANDLERS ================================ //
 
-	private void handlePreConnectionReply1( DatagramPacket datagram ) {
+	private void handlePreConnectionReply1( DatagramBuffer datagram ) {
 		// Prevent further connection attempts:
 		this.connectionAttempts = 11;
 
-		PacketBuffer buffer = new PacketBuffer( datagram.getData(), datagram.getOffset() );
+		PacketBuffer buffer = new PacketBuffer( datagram.getData(), 0 );
 		buffer.skip( 1 );                                       // Packet ID
 		buffer.readOfflineMessageDataId();                      // Offline Message Data ID
 		this.setGuid( buffer.readLong() );                      // Server GUID
@@ -147,15 +147,15 @@ class ClientConnection extends Connection {
 			return;
 		}
 
-		this.sendPreConnectionRequest2( datagram.getSocketAddress() );
+		this.sendPreConnectionRequest2( datagram.address() );
 	}
 
-	private void handlePreConnectionReply2( DatagramPacket datagram ) {
+	private void handlePreConnectionReply2( DatagramBuffer datagram ) {
 		if ( this.getState() != ConnectionState.INITIALIZING ) {
 			return;
 		}
 
-		PacketBuffer buffer = new PacketBuffer( datagram.getData(), datagram.getOffset() );
+		PacketBuffer buffer = new PacketBuffer( datagram.getData(), 0 );
 		buffer.skip( 1 );                                                                       // Packet ID
 		buffer.readOfflineMessageDataId();                                                      // Offline Message Data ID
 		if ( this.getGuid() != buffer.readLong() ) {                                            // Server GUID
@@ -179,20 +179,20 @@ class ClientConnection extends Connection {
 		this.initializeStructures();
 		this.setState( ConnectionState.RELIABLE );
 
-		this.sendConnectionRequest( datagram.getSocketAddress() );
+		this.sendConnectionRequest( datagram.address() );
 	}
 
-	private void handleAlreadyConnected( @SuppressWarnings( "unused" ) DatagramPacket datagram ) {
+	private void handleAlreadyConnected( @SuppressWarnings( "unused" ) DatagramBuffer datagram ) {
 		this.setState( ConnectionState.UNCONNECTED );
 		this.propagateConnectionAttemptFailed( "System is already connected" );
 	}
 
-	private void handleNoFreeIncomingConnections( @SuppressWarnings( "unused" ) DatagramPacket datagram ) {
+	private void handleNoFreeIncomingConnections( @SuppressWarnings( "unused" ) DatagramBuffer datagram ) {
 		this.setState( ConnectionState.UNCONNECTED );
 		this.propagateConnectionAttemptFailed( "Remote peer has no free incoming connections left" );
 	}
 
-	private void handleConnectionRequestFailed( @SuppressWarnings( "unused" ) DatagramPacket datagram ) {
+	private void handleConnectionRequestFailed( @SuppressWarnings( "unused" ) DatagramBuffer datagram ) {
 		this.setState( ConnectionState.UNCONNECTED );
 		this.propagateConnectionAttemptFailed( "Remote peer rejected connection request" );
 	}

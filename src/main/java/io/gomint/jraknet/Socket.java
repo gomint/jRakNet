@@ -25,6 +25,24 @@ public abstract class Socket implements AutoCloseable {
 
 	private static final Random random = new Random();
 
+	// We allocate buffers able to hold twice the maximum MTU size for the reasons listed below:
+	//
+	// Somehow I noticed receiving datagrams that exceeded their respective connection's MTU by
+	// far whenever they contained a Batch Packet. As this behaviour comes out of seemingly
+	// nowhere yet we do need to receive these batch packets we must have room enough to actually
+	// gather all this data even though it does not seem legit to allocate larger buffers for this
+	// reason. But as the underlying DatagramSocket provides no way of grabbing the minimum required
+	// buffer size for the datagram we are forced to play this dirty trick. If - at any point in the
+	// future - this behaviour changes, please add this buffer size back to its original value:
+	// MAXIMUM_MTU_SIZE.
+	//
+	// Examples of too large datagrams:
+	//  - Datagram containing BatchPacket for LoginPacket: 1507 bytes the batch packet alone (5th of March 2016)
+	//
+	// Suggestions:
+	//  - Make this value configurable in order to easily adjust this value whenever necessary
+	private static final int INTERNAL_BUFFER_SIZE = MAXIMUM_MTU_SIZE << 1;
+
 	protected DatagramSocket udpSocket;
 
 	// Threads used for modeling network "events"
@@ -37,11 +55,11 @@ public abstract class Socket implements AutoCloseable {
 	private SocketEventHandler eventHandler;
 
 	// Object-Pooling for vast instance created objects:
-	private ObjectPool<DatagramPacket> datagramPool;
+	private ObjectPool<DatagramBuffer> bufferPool;
 
 	// RakNet data:
-	private long                                 guid;
-	private BlockingQueue<DatagramPacket>        incomingDatagrams;
+	private long                          guid;
+	private BlockingQueue<DatagramBuffer> incomingDatagrams;
 
 	// ================================ CONSTRUCTORS ================================ //
 
@@ -123,7 +141,7 @@ public abstract class Socket implements AutoCloseable {
 		}
 
 		// Destroy object pools:
-		this.datagramPool = null;
+		this.bufferPool = null;
 
 		// Close the UDP socket:
 		this.udpSocket.close();
@@ -144,9 +162,10 @@ public abstract class Socket implements AutoCloseable {
 	 * datagram handling if necessary.
 	 *
 	 * @param datagram The datagram that was just received
+	 *
 	 * @return Whether or not the datagram was handled by this method already and should be processed no further
 	 */
-	protected boolean receiveDatagram( DatagramPacket datagram ) {
+	protected boolean receiveDatagram( DatagramBuffer datagram ) {
 		return false;
 	}
 
@@ -155,9 +174,9 @@ public abstract class Socket implements AutoCloseable {
 	 * this datagram to the connection it belongs to in order to deserialize it appropriately.
 	 *
 	 * @param datagram The datagram to be handled
-	 * @param time The current system time
+	 * @param time     The current system time
 	 */
-	protected abstract void handleDatagram( DatagramPacket datagram, long time );
+	protected abstract void handleDatagram( DatagramBuffer datagram, long time );
 
 	/**
 	 * Updates all connections this socket created.
@@ -244,27 +263,9 @@ public abstract class Socket implements AutoCloseable {
 	 * of certain objects.
 	 */
 	private void createObjectPools() {
-		this.datagramPool = new FreeListObjectPool<>( new InstanceCreator<DatagramPacket>() {
-			public DatagramPacket createInstance( ObjectPool<DatagramPacket> pool ) {
-				// We allocate buffers able to hold twice the maximum MTU size for the reasons listed below:
-				//
-				// Somehow I noticed receiving datagrams that exceeded their respective connection's MTU by
-				// far whenever they contained a Batch Packet. As this behaviour comes out of seemingly
-				// nowhere yet we do need to receive these batch packets we must have room enough to actually
-				// gather all this data even though it does not seem legit to allocate larger buffers for this
-				// reason. But as the underlying DatagramSocket provides no way of grabbing the minimum required
-				// buffer size for the datagram we are forced to play this dirty trick. If - at any point in the
-				// future - this behaviour changes, please add this buffer size back to its original value:
-				// MAXIMUM_MTU_SIZE.
-				//
-				// Examples of too large datagrams:
-				//  - Datagram containing BatchPacket for LoginPacket: 1507 bytes the batch packet alone (5th of March 2016)
-				//
-				// Suggestions:
-				//  - Make this value configurable in order to easily adjust this value whenever necessary
-				final int INTERNAL_BUFFER_SIZE = MAXIMUM_MTU_SIZE << 1;
-
-				return new DatagramPacket( new byte[INTERNAL_BUFFER_SIZE], INTERNAL_BUFFER_SIZE );
+		this.bufferPool = new FreeListObjectPool<>( new InstanceCreator<DatagramBuffer>() {
+			public DatagramBuffer createInstance( ObjectPool<DatagramBuffer> pool ) {
+				return new DatagramBuffer( INTERNAL_BUFFER_SIZE );
 			}
 		} );
 	}
@@ -283,7 +284,7 @@ public abstract class Socket implements AutoCloseable {
 	private void startReceiveThread() {
 		this.receiveThread = this.eventLoopFactory.newThread( new Runnable() {
 			public void run() {
-                Thread.currentThread().setName( Thread.currentThread().getName() + " [jRaknet " + Socket.this.getClass().getSimpleName() + " Receive]" );
+				Thread.currentThread().setName( Thread.currentThread().getName() + " [jRaknet " + Socket.this.getClass().getSimpleName() + " Receive]" );
 				Socket.this.pollUdpSocket();
 			}
 		} );
@@ -299,7 +300,7 @@ public abstract class Socket implements AutoCloseable {
 		this.updateThread = this.eventLoopFactory.newThread( new Runnable() {
 			@Override
 			public void run() {
-                Thread.currentThread().setName( Thread.currentThread().getName() + " [jRaknet " + Socket.this.getClass().getSimpleName() + " Update]" );
+				Thread.currentThread().setName( Thread.currentThread().getName() + " [jRaknet " + Socket.this.getClass().getSimpleName() + " Update]" );
 				Socket.this.update();
 			}
 		} );
@@ -313,25 +314,69 @@ public abstract class Socket implements AutoCloseable {
 	 */
 	private void pollUdpSocket() {
 		while ( this.running.get() ) {
-			DatagramPacket datagram = this.datagramPool.allocate();
+			// ---------------------------------------------------------------------------
+			// Allocate a 2^16 bytes long buffer
+			// ---------------------------------------------------------------------------
+			// During testing we encountered situations in which MCPE exceeded
+			// the MTU size by far by unpredictable amounts of data. Even occasions
+			// with more than 7x the actual MTU size haven been seen. Thus there was
+			// the need to be able to potentially get ALL possible datagrams no
+			// matter if they exceed the MTU thus do not fit into our pre-allocated
+			// buffers and thus have their remaining data discarded. This is where
+			// this buffer comes into play.
+			//
+			// The UDP header possesses a 16-bit field encoding the length of the
+			// datagram. Therefore the longest possible size of any datagram is
+			// 2^16 bytes and thus all datagrams will be able to fit into this buffer
+			// without losing any data at all.
+			// Unfortunately though no one would appreciate it if we would pre-allocate
+			// multiple 64kB buffers for smaller datagrams which is why I came up with
+			// the following idea:
+			// The data received from the socket is first copied into this recvbuf so
+			// that we will be able to get ALL data. Afterwards we take check whether
+			// or not the datagram's actual length would fit into one of the buffers
+			// we preallocated (~2kB) and if so the data is copied into one of these
+			// buffers. Otherwise we manually allocate a new array just large enough
+			// to hold our datagram and pass it through the system deleting it once
+			// it was pushed to the end-user.
+			// ---------------------------------------------------------------------------
+			byte[]         recvbuf = new byte[65536];
+			DatagramPacket datagram;
 			try {
+				datagram = new DatagramPacket( recvbuf, recvbuf.length );
 				this.udpSocket.receive( datagram );
 
 				if ( datagram.getLength() == 0 ) {
-					this.datagramPool.putBack( datagram );
 					continue;
 				}
 
+				DatagramBuffer buffer;
+				if ( datagram.getLength() <= INTERNAL_BUFFER_SIZE ) {
+					buffer = this.bufferPool.allocate();
 
-				if ( !this.receiveDatagram( datagram ) ) {
+					// Copy data into buffers:
+					System.arraycopy( datagram.getData(), datagram.getOffset(), buffer.getData(), 0, datagram.getLength() );
+					buffer.length( datagram.getLength() );
+					buffer.address( datagram.getSocketAddress() );
+				} else {
+					// Copy data into new array:
+					byte[] data = new byte[datagram.getLength()];
+					System.arraycopy( datagram.getData(), datagram.getOffset(), data, 0, datagram.getLength() );
+
+					buffer = new DatagramBuffer( datagram.getSocketAddress(), data );
+				}
+
+				if ( !this.receiveDatagram( buffer ) ) {
 					// Push datagram to update queue:
 					try {
-						this.incomingDatagrams.put( datagram );
+						this.incomingDatagrams.put( buffer );
 					} catch ( InterruptedException e ) {
 						this.getImplementationLogger().error( "Failed to handle incoming datagram", e );
 					}
 				} else {
-					this.datagramPool.putBack( datagram );
+					if ( buffer.cached() ) {
+						this.bufferPool.putBack( buffer );
+					}
 				}
 			} catch ( IOException e ) {
 				e.printStackTrace();
@@ -348,12 +393,14 @@ public abstract class Socket implements AutoCloseable {
 			start = System.currentTimeMillis();
 
 			// Handle all incoming datagrams:
-			DatagramPacket datagram;
-			while( !this.incomingDatagrams.isEmpty() ) {
+			DatagramBuffer datagram;
+			while ( !this.incomingDatagrams.isEmpty() ) {
 				try {
 					datagram = this.incomingDatagrams.take();
 					this.handleDatagram( datagram, start );
-					this.datagramPool.putBack( datagram );
+					if ( datagram.cached() ) {
+						this.bufferPool.putBack( datagram );
+					}
 				} catch ( InterruptedException e ) {
 					this.getImplementationLogger().error( "Failed to handle incoming datagram", e );
 				}

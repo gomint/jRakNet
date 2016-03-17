@@ -58,7 +58,7 @@ class ServerConnection extends Connection {
 	 * @return Whether or not the datagram was handled already and should be processed no further
 	 */
 	@Override
-	protected boolean handleDatagram0( DatagramPacket datagram, long time ) {
+	protected boolean handleDatagram0( DatagramBuffer datagram, long time ) {
 		// Handle special internal packets:
 		byte packetId = datagram.getData()[0];
 		switch ( packetId ) {
@@ -123,7 +123,7 @@ class ServerConnection extends Connection {
 
 	// ================================ PACKET HANDLERS ================================ //
 
-	private void handlePreConnectionRequest1( DatagramPacket datagram ) {
+	private void handlePreConnectionRequest1( DatagramBuffer datagram ) {
 		this.setState( ConnectionState.INITIALIZING );
 
 		byte remoteProtocol = datagram.getData()[1 + RakNetConstraints.OFFLINE_MESSAGE_DATA_ID.length];
@@ -138,8 +138,8 @@ class ServerConnection extends Connection {
 		this.sendConnectionReply1( datagram );
 	}
 
-	private void handlePreConnectionRequest2( DatagramPacket datagram ) {
-		PacketBuffer buffer = new PacketBuffer( datagram.getData(), datagram.getOffset() );
+	private void handlePreConnectionRequest2( DatagramBuffer datagram ) {
+		PacketBuffer buffer = new PacketBuffer( datagram.getData(), 0 );
 		buffer.skip( 1 );                                                                       // Packet ID
 		buffer.readOfflineMessageDataId();                                                      // Offline Message Data ID
 		@SuppressWarnings( "unused" ) InetSocketAddress bindAddress = buffer.readAddress();     // Address the client bound to
@@ -222,9 +222,9 @@ class ServerConnection extends Connection {
 		}
 	}
 
-	private void sendConnectionReply1( DatagramPacket request ) {
+	private void sendConnectionReply1( DatagramBuffer request ) {
 		// The request packet will be as large as possible in order to determine the MTU size:
-		int mtuSize = request.getLength() + UDP_DATAGRAM_HEADER_SIZE;
+		int mtuSize = request.length() + UDP_DATAGRAM_HEADER_SIZE;
 		if ( mtuSize > MAXIMUM_MTU_SIZE ) {
 			mtuSize = MAXIMUM_MTU_SIZE;
 		}
