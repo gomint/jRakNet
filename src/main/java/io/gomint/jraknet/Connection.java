@@ -948,6 +948,7 @@ public abstract class Connection {
 							this.reliableMessageQueue.set( holes, false );
 						} else {
 							// Packet was already received (Duplicate) --> Discard
+							packet = new EncapsulatedPacket();
 							continue;
 						}
 					} else {
@@ -967,6 +968,7 @@ public abstract class Connection {
 					}
 				} else {
 					// Packet was already received (Duplicate) --> Discard
+					packet = new EncapsulatedPacket();
 					continue;
 				}
 
@@ -1050,6 +1052,7 @@ public abstract class Connection {
 				// Pass on to user
 				this.pushReceivedPacket( packet );
 			}
+			packet = new EncapsulatedPacket();
 		}
 	}
 
