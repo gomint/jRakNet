@@ -11,8 +11,10 @@ import java.net.SocketAddress;
 import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.Set;
 
 import static io.gomint.jraknet.RakNetConstraints.*;
 
@@ -32,7 +34,7 @@ public class ServerSocket extends Socket {
 	private final int                                  maxConnections;
 	private       Map<SocketAddress, ServerConnection> connectionsByAddress;
 	private       Map<Long, ServerConnection>          connectionsByGuid;
-	private       int                                  currentConnections;
+	private       Set<ServerConnection>                activeConnections;
 
 	// MOTD-Workaround for Mojang MOTD:
 	private String motd;
@@ -46,7 +48,7 @@ public class ServerSocket extends Socket {
 	public ServerSocket( int maxConnections ) {
 		this.logger = LoggerFactory.getLogger( ServerSocket.class );
 		this.maxConnections = maxConnections;
-		this.currentConnections = 0;
+		this.activeConnections = new HashSet<>();
 		this.setMotd( "GoMint" );
 		this.generateGuid();
 	}
@@ -60,7 +62,7 @@ public class ServerSocket extends Socket {
 	public ServerSocket( Logger logger, int maxConnections ) {
 		this.logger = logger;
 		this.maxConnections = maxConnections;
-		this.currentConnections = 0;
+		this.activeConnections = new HashSet<>();
 		this.setMotd( "GoMint" );
 		this.generateGuid();
 	}
@@ -200,7 +202,7 @@ public class ServerSocket extends Socket {
 
 				if ( connection.hasGuid() ) {
 					this.connectionsByGuid.remove( connection.getGuid() );
-                    --this.currentConnections;
+                    this.activeConnections.remove( connection );
 				}
 			} else {
 				if ( !connection.update( time ) ) {
@@ -208,7 +210,7 @@ public class ServerSocket extends Socket {
 
 					if ( connection.hasGuid() ) {
 						this.connectionsByGuid.remove( connection.getGuid() );
-                        --this.currentConnections;
+						this.activeConnections.remove( connection );
 					}
 				}
 			}
@@ -262,7 +264,7 @@ public class ServerSocket extends Socket {
 	 * @return Whether or not another new incoming connection should be allowed
 	 */
 	boolean allowIncomingConnection() {
-		return ( this.currentConnections < this.maxConnections );
+		return ( this.activeConnections.size() < this.maxConnections );
 	}
 
 	/**
@@ -305,11 +307,11 @@ public class ServerSocket extends Socket {
 	 * @return Whether or not the connection request should be accepted.
 	 */
 	boolean notifyConnectionRequest( ServerConnection connection ) {
-		if ( this.currentConnections >= this.maxConnections ) {
+		if ( this.activeConnections.size() >= this.maxConnections ) {
 			return false;
 		}
 
-		++this.currentConnections;
+		this.activeConnections.add( connection );
 		return true;
 	}
 
@@ -331,10 +333,8 @@ public class ServerSocket extends Socket {
 	 * @param connection The connection that got disconnected
 	 */
 	void propagateConnectionClosed( ServerConnection connection ) {
-		if ( connection.isConnected() ) {
-			// Got to handle this disconnect:
-			this.removeActiveConnection( connection );
-		}
+		// Got to handle this disconnect:
+		this.removeActiveConnection( connection );
 
 		this.propagateEvent( new SocketEvent( SocketEvent.Type.CONNECTION_CLOSED, connection ) );
 	}
@@ -345,10 +345,8 @@ public class ServerSocket extends Socket {
 	 * @param connection The connection that disconnected
 	 */
 	void propagateConnectionDisconnected( ServerConnection connection ) {
-		if ( connection.isConnected() ) {
-			// Got to handle this disconnect:
-			this.removeActiveConnection( connection );
-		}
+		// Got to handle this disconnect:
+		this.removeActiveConnection( connection );
 
 		this.propagateEvent( new SocketEvent( SocketEvent.Type.CONNECTION_DISCONNECTED, connection ) );
 	}
@@ -372,7 +370,7 @@ public class ServerSocket extends Socket {
 		                      ( (long) buffer[index++] << 8 ) |
 		                      ( (long) buffer[index] ) );
 
-		byte[] motdBytes = String.format( MOTD_FORMAT, this.motd, this.currentConnections, this.maxConnections ).getBytes( StandardCharsets.US_ASCII );
+		byte[] motdBytes = String.format( MOTD_FORMAT, this.motd, this.activeConnections.size(), this.maxConnections ).getBytes( StandardCharsets.US_ASCII );
 		PacketBuffer packet = new PacketBuffer( 35 + motdBytes.length );
 		packet.writeByte( UNCONNECTED_PONG );
 		packet.writeLong( sendPingTime );
@@ -394,7 +392,7 @@ public class ServerSocket extends Socket {
 	 * @param connection The connection to remove
 	 */
 	private void removeActiveConnection( @SuppressWarnings( "unused" ) ServerConnection connection ) {
-		--this.currentConnections;
+		this.activeConnections.remove( connection );
 	}
 
 	/**
