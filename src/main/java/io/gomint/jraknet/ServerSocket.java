@@ -182,7 +182,14 @@ public class ServerSocket extends Socket {
 	 */
 	@Override
 	protected void handleDatagram( DatagramBuffer datagram, long time ) {
-		this.getConnection( datagram.address() ).handleDatagram( datagram, time );
+		ServerConnection connection = this.getConnection( datagram );
+		if ( connection != null ) {
+			// #getConnection() may return null if there is currently no connection
+			// associated with the socket address the datagram came from and the
+			// datagram itself does not contain the first packet of the connection
+			// attempt chain:
+			connection.handleDatagram( datagram, time );
+		}
 	}
 
 	/**
@@ -397,16 +404,23 @@ public class ServerSocket extends Socket {
 
 	/**
 	 * Gets or creates a connection given its socket address. Must only be invoked in update thread in order
-	 * to ensure thread safety.
+	 * to ensure thread safety. May return null if there is no connection associated with the sender of the
+	 * given datagram and the received datagram does not contain a connection attempt packet
 	 *
-	 * @param address The address of the connection to get
-	 * @return The connection of the given address
+	 * @param datagram The datagram buffer holding the actual datagram data. USed to access socket address of sender and packet ID
+	 * @return The connection of the given address or null (see above)
 	 */
-	private ServerConnection getConnection( SocketAddress address ) {
-		ServerConnection connection = this.connectionsByAddress.get( address );
+	private ServerConnection getConnection( DatagramBuffer datagram ) {
+		ServerConnection connection = this.connectionsByAddress.get( datagram.address() );
 		if ( connection == null ) {
-			connection = new ServerConnection( this, address, ConnectionState.UNCONNECTED );
-			this.connectionsByAddress.put( address, connection );
+			// Only construct a new server connection if this datagram contains
+			// a valid OPEN_CONNECTION_REQUEST_1 packet as this might be a discarded
+			// or invalid connection receive otherwise:
+			byte packetId = datagram.getData()[0];
+			if ( packetId == OPEN_CONNECTION_REQUEST_1 ) {
+				connection = new ServerConnection( this, datagram.address(), ConnectionState.UNCONNECTED );
+				this.connectionsByAddress.put( datagram.address(), connection );
+			}
 		}
 		return connection;
 	}

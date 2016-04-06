@@ -123,6 +123,11 @@ class ServerConnection extends Connection {
 	// ================================ PACKET HANDLERS ================================ //
 
 	private void handlePreConnectionRequest1( DatagramBuffer datagram ) {
+		if ( this.getState() != ConnectionState.UNCONNECTED ) {
+			// Connection is not in a valid state to handle this packet:
+			return;
+		}
+
 		this.setState( ConnectionState.INITIALIZING );
 
 		byte remoteProtocol = datagram.getData()[1 + RakNetConstraints.OFFLINE_MESSAGE_DATA_ID.length];
@@ -138,6 +143,11 @@ class ServerConnection extends Connection {
 	}
 
 	private void handlePreConnectionRequest2( DatagramBuffer datagram ) {
+		if ( this.getState() != ConnectionState.INITIALIZING ) {
+			// Connection is not in a valid state to handle this packet:
+			return;
+		}
+
 		PacketBuffer buffer = new PacketBuffer( datagram.getData(), 0 );
 		buffer.skip( 1 );                                                                       // Packet ID
 		buffer.readOfflineMessageDataId();                                                      // Offline Message Data ID
@@ -194,6 +204,11 @@ class ServerConnection extends Connection {
 	}
 
 	private void handleNewIncomingConnection( @SuppressWarnings( "unused" ) EncapsulatedPacket packet ) {
+		if ( this.getState() != ConnectionState.CONNECTING ) {
+			// Connection is not in a valid state to handle this packet:
+			return;
+		}
+
 		if ( !this.server.notifyConnectionRequest( this ) ) {
 			// This connection is hereby cancelled immediately!
 			this.setState( ConnectionState.UNCONNECTED );
