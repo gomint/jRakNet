@@ -125,6 +125,11 @@ public abstract class Socket implements AutoCloseable {
 	public void close() {
 		// Stop all threads safely:
 		this.running.set( false );
+
+		// Close the UDP socket:
+		this.udpSocket.close();
+		this.udpSocket = null;
+
 		try {
 			this.updateThread.join();
 		} catch ( InterruptedException ignored ) {
@@ -143,10 +148,6 @@ public abstract class Socket implements AutoCloseable {
 
 		// Destroy object pools:
 		this.bufferPool = null;
-
-		// Close the UDP socket:
-		this.udpSocket.close();
-		this.udpSocket = null;
 	}
 
 	// ================================ IMPLEMENTATION HOOKS ================================ //
