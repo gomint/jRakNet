@@ -65,6 +65,10 @@ public abstract class Socket implements AutoCloseable {
 	// RakNet data:
 	private long                          guid;
 
+	// Update thread ticker
+	private Lock tickLock = new ReentrantLock();
+	private Condition tickCondition = tickLock.newCondition();
+
 	// ================================ CONSTRUCTORS ================================ //
 
 	Socket() {
@@ -385,33 +389,30 @@ public abstract class Socket implements AutoCloseable {
 		this.cleanupReceiveThread();
 	}
 
+	protected void wakeUpdate() {
+		this.tickLock.lock();
+		try {
+			this.tickCondition.signal();
+		} finally {
+			this.tickLock.unlock();
+		}
+	}
 
 	private void update() {
-		Lock tickLock = new ReentrantLock();
-		Condition tickCondition = tickLock.newCondition();
-
-		long skipNanos = TimeUnit.SECONDS.toNanos( 1 ) / 512;
-		long start;
 		long startMillis;
 
 		while ( this.running.get() ) {
-			tickLock.lock();
+			this.tickLock.lock();
 			try {
 				startMillis = System.currentTimeMillis();
-				start = System.nanoTime();
 
 				// Update all connections:
 				this.updateConnections( startMillis );
-
-				long diff = System.nanoTime() - start;
-
-				if ( diff < skipNanos ) {
-					tickCondition.await( skipNanos - diff, TimeUnit.NANOSECONDS );
-				}
+				this.tickCondition.await( 10, TimeUnit.MILLISECONDS );
 			} catch ( InterruptedException e ) {
 				// Ignored ._.
 			} finally {
-				tickLock.unlock();
+				this.tickLock.unlock();
 			}
 		}
 

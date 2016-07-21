@@ -310,4 +310,28 @@ class ServerConnection extends Connection {
 		this.sendNoFreeIncomingConnections();
 	}
 
+	@Override
+	public void send( byte[] data ) {
+		super.send( data );
+		this.server.wakeUpdate();
+	}
+
+	@Override
+	public void send( PacketReliability reliability, byte[] data ) {
+		super.send( reliability, data );
+		this.server.wakeUpdate();
+	}
+
+	@Override
+	public void send( PacketReliability reliability, int orderingChannel, byte[] data ) {
+		super.send( reliability, orderingChannel, data );
+		this.server.wakeUpdate();
+	}
+
+	@Override
+	public void send( PacketReliability reliability, int orderingChannel, byte[] data, int offset, int length ) {
+		super.send( reliability, orderingChannel, data, offset, length );
+		this.server.wakeUpdate();
+	}
+
 }

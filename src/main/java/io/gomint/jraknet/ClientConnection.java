@@ -288,4 +288,28 @@ class ClientConnection extends Connection {
 		this.send( PacketReliability.RELIABLE_ORDERED, 0, buffer.getBuffer() );
 	}
 
+	@Override
+	public void send( byte[] data ) {
+		super.send( data );
+		this.client.wakeUpdate();
+	}
+
+	@Override
+	public void send( PacketReliability reliability, byte[] data ) {
+		super.send( reliability, data );
+		this.client.wakeUpdate();
+	}
+
+	@Override
+	public void send( PacketReliability reliability, int orderingChannel, byte[] data ) {
+		super.send( reliability, orderingChannel, data );
+		this.client.wakeUpdate();
+	}
+
+	@Override
+	public void send( PacketReliability reliability, int orderingChannel, byte[] data, int offset, int length ) {
+		super.send( reliability, orderingChannel, data, offset, length );
+		this.client.wakeUpdate();
+	}
+
 }

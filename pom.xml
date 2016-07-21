@@ -6,7 +6,7 @@
 
     <groupId>io.gomint</groupId>
     <artifactId>jraknet</artifactId>
-    <version>2.2.0-0.15.2</version>
+    <version>2.3.0-0.15.2</version>
 
     <!-- Distribution Management -->
     <distributionManagement>
