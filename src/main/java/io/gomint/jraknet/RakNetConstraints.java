@@ -9,7 +9,7 @@ public class RakNetConstraints {
 	// =========================== CONSTANTS =========================== //
 
 	// Version of the RakNet library's protocol MCPE is using
-	public static final byte RAKNET_PROTOCOL_VERSION = 7;
+	public static final byte RAKNET_PROTOCOL_VERSION = 8;
 
 	// Number of ordering channels RakNet supports at max
 	public static final int NUM_ORDERING_CHANNELS = 32;
@@ -103,10 +103,10 @@ public class RakNetConstraints {
 	// =========================== MOJANG STUFF =========================== //
 
 	// Version of Pocket Edition's protocol (needs to be figured out by testing different values inside ping)
-	public static final int MINECRAFT_PE_PROTOCOL_VERSION = 45;
+	public static final int MINECRAFT_PE_PROTOCOL_VERSION = 81;
 
 	// Version of the Pocket Edition server (may be found in main menu)
-	public static final String MINECRAFT_PE_NETWORK_VERSION = "0.14.0";
+	public static final String MINECRAFT_PE_NETWORK_VERSION = "0.15.2";
 
 	// Format for all MOTD messages:
 	//  - 0: String with actual MOTD
