@@ -260,7 +260,7 @@ public class PacketBuffer {
 	}
 
 	public void writeString( String v ) {
-		byte[] ascii = v.getBytes( StandardCharsets.US_ASCII );
+		byte[] ascii = v.getBytes( StandardCharsets.UTF_8 );
 		this.ensureCapacity( 2 + ascii.length );
 		this.writeUShort( ascii.length );
 		System.arraycopy( ascii, 0, this.buffer, this.position, ascii.length );
