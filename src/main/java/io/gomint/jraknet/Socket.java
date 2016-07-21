@@ -13,8 +13,12 @@ import java.util.Random;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 import static io.gomint.jraknet.RakNetConstraints.MAXIMUM_MTU_SIZE;
 
@@ -60,7 +64,6 @@ public abstract class Socket implements AutoCloseable {
 
 	// RakNet data:
 	private long                          guid;
-	private BlockingQueue<DatagramBuffer> incomingDatagrams;
 
 	// ================================ CONSTRUCTORS ================================ //
 
@@ -225,7 +228,6 @@ public abstract class Socket implements AutoCloseable {
 		this.running.set( true );
 		this.initializeEventLoopFactory();
 		this.createObjectPools();
-		this.initializeStructures();
 		this.startReceiveThread();
 		this.startUpdateThread();
 	}
@@ -273,13 +275,6 @@ public abstract class Socket implements AutoCloseable {
 	}
 
 	/**
-	 * Initializes any sort of structures that are required internally.
-	 */
-	private void initializeStructures() {
-		this.incomingDatagrams = new LinkedBlockingQueue<>( 512 );
-	}
-
-	/**
 	 * Starts the thread that will continuously poll the UDP socket for incoming
 	 * datagrams.
 	 */
@@ -315,6 +310,7 @@ public abstract class Socket implements AutoCloseable {
 	 * to dedicated handlers that will decode the datagram into actual data packets.
 	 */
 	private void pollUdpSocket() {
+		long start;
 		while ( this.running.get() ) {
 			// ---------------------------------------------------------------------------
 			// Allocate a 2^16 bytes long buffer
@@ -368,12 +364,13 @@ public abstract class Socket implements AutoCloseable {
 					buffer = new DatagramBuffer( datagram.getSocketAddress(), data );
 				}
 
+				start = System.currentTimeMillis();
 				if ( !this.receiveDatagram( buffer ) ) {
 					// Push datagram to update queue:
-					try {
-						this.incomingDatagrams.put( buffer );
-					} catch ( InterruptedException e ) {
-						this.getImplementationLogger().error( "Failed to handle incoming datagram", e );
+					this.handleDatagram( buffer, start );
+
+					if ( buffer.cached() ) {
+						this.bufferPool.putBack( buffer );
 					}
 				} else {
 					if ( buffer.cached() ) {
@@ -390,35 +387,31 @@ public abstract class Socket implements AutoCloseable {
 
 
 	private void update() {
+		Lock tickLock = new ReentrantLock();
+		Condition tickCondition = tickLock.newCondition();
+
+		long skipNanos = TimeUnit.SECONDS.toNanos( 1 ) / 512;
 		long start;
+		long startMillis;
+
 		while ( this.running.get() ) {
-			start = System.currentTimeMillis();
+			tickLock.lock();
+			try {
+				startMillis = System.currentTimeMillis();
+				start = System.nanoTime();
 
-			// Handle all incoming datagrams:
-			DatagramBuffer datagram;
-			while ( !this.incomingDatagrams.isEmpty() ) {
-				try {
-					datagram = this.incomingDatagrams.take();
-					this.handleDatagram( datagram, start );
-					if ( datagram.cached() ) {
-						this.bufferPool.putBack( datagram );
-					}
-				} catch ( InterruptedException e ) {
-					this.getImplementationLogger().error( "Failed to handle incoming datagram", e );
+				// Update all connections:
+				this.updateConnections( startMillis );
+
+				long diff = System.nanoTime() - start;
+
+				if ( diff < skipNanos ) {
+					tickCondition.await( skipNanos - diff, TimeUnit.NANOSECONDS );
 				}
-			}
-
-			// Update all connections:
-			this.updateConnections( start );
-
-			long end = System.currentTimeMillis();
-
-			if ( end - start < 10L ) { // Update 100 times per second if possible
-				try {
-					Thread.sleep( 10L - ( end - start ) );
-				} catch ( InterruptedException ignored ) {
-					// ._.
-				}
+			} catch ( InterruptedException e ) {
+				// Ignored ._.
+			} finally {
+				tickLock.unlock();
 			}
 		}
 
