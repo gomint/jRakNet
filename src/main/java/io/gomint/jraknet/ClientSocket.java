@@ -232,10 +232,10 @@ public class ClientSocket extends Socket {
      */
     @Override
     protected void cleanupUpdateThread() {
-        long time = System.currentTimeMillis();
+        // long time = System.currentTimeMillis();
         if ( this.connection != null ) {
             this.connection.disconnect( "Socket is closing" );
-            this.connection.update( time );
+            // this.connection.update( time );
         }
         this.connection = null;
     }

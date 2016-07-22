@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static io.gomint.jraknet.RakNetConstraints.*;
@@ -201,9 +202,14 @@ public abstract class Connection {
      */
     public EncapsulatedPacket poll() {
         try {
-            return this.receiveBuffer.take();
+            while ( this.isConnected() || !this.receiveBuffer.isEmpty() ) {
+                EncapsulatedPacket packet = this.receiveBuffer.poll( 50, TimeUnit.MILLISECONDS );
+                if ( packet != null ) {
+                    return packet;
+                }
+            }
         } catch ( InterruptedException e ) {
-            e.printStackTrace();
+            // ._.
         }
 
         return null;
