@@ -6,16 +6,15 @@ import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.DatagramChannel;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.nio.channels.spi.SelectorProvider;
-import java.util.Arrays;
-import java.util.Iterator;
-import java.util.Random;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Condition;
@@ -64,6 +63,9 @@ public abstract class Socket implements AutoCloseable {
 
     // RakNet data:
     private long guid;
+
+    // Blocked clients:
+    private Map<SocketAddress, Long> blocked = new HashMap<>();
 
     // ================================ CONSTRUCTORS ================================ //
 
@@ -294,6 +296,19 @@ public abstract class Socket implements AutoCloseable {
                 int readyChannels = selector.select();
                 if ( readyChannels == 0 ) continue;
 
+                // Check for unblocking connections
+                long now = System.currentTimeMillis();
+                Set<SocketAddress> unblock = new HashSet<>();
+                for ( Map.Entry<SocketAddress, Long> socketAddressLongEntry : this.blocked.entrySet() ) {
+                    if ( socketAddressLongEntry.getValue() < now ) {
+                        unblock.add( socketAddressLongEntry.getKey() );
+                    }
+                }
+
+                for ( SocketAddress socketAddress : unblock ) {
+                    this.blocked.remove( socketAddress );
+                }
+
                 Set<SelectionKey> selectedKeys = selector.selectedKeys();
                 Iterator<SelectionKey> keyIterator = selectedKeys.iterator();
                 while ( keyIterator.hasNext() ) {
@@ -329,7 +344,7 @@ public abstract class Socket implements AutoCloseable {
 
                     try {
                         InetSocketAddress socketAddress = (InetSocketAddress) ( (DatagramChannel) key.channel() ).receive( buffer );
-                        if ( socketAddress == null ) {
+                        if ( socketAddress == null || this.blocked.containsKey( socketAddress ) ) {
                             continue;
                         }
 
@@ -339,9 +354,14 @@ public abstract class Socket implements AutoCloseable {
                         packet.setLength( buffer.position() );
                         packet.setData( Arrays.copyOf( buffer.array(), packet.getLength() ) );
 
-                        if ( !this.receiveDatagram( packet ) ) {
-                            // Push datagram to update queue:
-                            this.handleDatagram( packet, System.currentTimeMillis() );
+                        try {
+                            if ( !this.receiveDatagram( packet ) ) {
+                                // Push datagram to update queue:
+                                this.handleDatagram( packet, System.currentTimeMillis() );
+                            }
+                        } catch ( Throwable e ) {
+                            // This connection has thrown an error. Block it for further packets
+                            this.blockAddress( socketAddress );
                         }
                     } catch ( IOException e ) {
                         e.printStackTrace();
@@ -353,6 +373,10 @@ public abstract class Socket implements AutoCloseable {
         } catch ( IOException e ) {
             e.printStackTrace();
         }
+    }
+
+    private void blockAddress( InetSocketAddress socketAddress ) {
+        this.blocked.put( socketAddress, System.currentTimeMillis() + TimeUnit.SECONDS.toMillis( 30 ) );
     }
 
     private void update() {
