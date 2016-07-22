@@ -8,8 +8,10 @@ class SplitPacketAssembler {
 
 	private final EncapsulatedPacket[] parts;
 	private       int                  found;
+	private long start;
 
 	public SplitPacketAssembler( EncapsulatedPacket packet ) {
+		this.start = System.nanoTime();
 		this.parts = new EncapsulatedPacket[(int) packet.getSplitPacketCount()];
 		this.found = 0;
 	}

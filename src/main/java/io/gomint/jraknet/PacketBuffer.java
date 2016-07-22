@@ -6,6 +6,7 @@ import java.net.Inet4Address;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -316,7 +317,7 @@ public class PacketBuffer {
 		this.buffer[this.position++] = (byte) ( ( v >> 16 ) & 0xFF );
 	}
 
-	public int writeTriadRangeList( TriadRange[] ranges, int offset, int length, int maxSize ) {
+	public int writeTriadRangeList( List<TriadRange> ranges, int offset, int length, int maxSize ) {
 		this.ensureCapacity( 2 );
 
 		// Reserve two bytes for the length:
@@ -326,13 +327,13 @@ public class PacketBuffer {
 
 		int count = 0;
 		for ( int i = offset; i < offset + length; ++i ) {
-			if ( ranges[i].getMin() == ranges[i].getMax() ) {
+			if ( ranges.get(i).getMin() == ranges.get(i).getMax() ) {
 				if ( maxSize < 4 ) {
 					break;
 				}
 
 				this.writeBoolean( true );
-				this.writeTriad( ranges[i].getMin() );
+				this.writeTriad( ranges.get(i).getMin() );
 				maxSize -= 4;
 			} else {
 				if ( maxSize < 7 ) {
@@ -340,8 +341,8 @@ public class PacketBuffer {
 				}
 
 				this.writeBoolean( false );
-				this.writeTriad( ranges[i].getMin() );
-				this.writeTriad( ranges[i].getMax() );
+				this.writeTriad( ranges.get(i).getMin() );
+				this.writeTriad( ranges.get(i).getMax() );
 				maxSize -= 7;
 			}
 			++count;

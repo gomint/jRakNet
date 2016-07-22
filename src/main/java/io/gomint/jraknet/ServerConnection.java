@@ -3,6 +3,7 @@ package io.gomint.jraknet;
 import org.slf4j.Logger;
 
 import java.io.IOException;
+import java.net.DatagramPacket;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 
@@ -57,7 +58,7 @@ class ServerConnection extends Connection {
 	 * @return Whether or not the datagram was handled already and should be processed no further
 	 */
 	@Override
-	protected boolean handleDatagram0( DatagramBuffer datagram, long time ) {
+	protected boolean handleDatagram0( DatagramPacket datagram, long time ) {
 		// Handle special internal packets:
 		byte packetId = datagram.getData()[0];
 		switch ( packetId ) {
@@ -122,7 +123,7 @@ class ServerConnection extends Connection {
 
 	// ================================ PACKET HANDLERS ================================ //
 
-	private void handlePreConnectionRequest1( DatagramBuffer datagram ) {
+	private void handlePreConnectionRequest1( DatagramPacket datagram ) {
 		if ( this.getState() != ConnectionState.UNCONNECTED ) {
 			// Connection is not in a valid state to handle this packet:
 			return;
@@ -142,7 +143,7 @@ class ServerConnection extends Connection {
 		this.sendConnectionReply1( datagram );
 	}
 
-	private void handlePreConnectionRequest2( DatagramBuffer datagram ) {
+	private void handlePreConnectionRequest2( DatagramPacket datagram ) {
 		if ( this.getState() != ConnectionState.INITIALIZING ) {
 			// Connection is not in a valid state to handle this packet:
 			return;
@@ -236,9 +237,9 @@ class ServerConnection extends Connection {
 		}
 	}
 
-	private void sendConnectionReply1( DatagramBuffer request ) {
+	private void sendConnectionReply1( DatagramPacket request ) {
 		// The request packet will be as large as possible in order to determine the MTU size:
-		int mtuSize = request.length() + UDP_DATAGRAM_HEADER_SIZE;
+		int mtuSize = request.getLength() + UDP_DATAGRAM_HEADER_SIZE;
 		if ( mtuSize > MAXIMUM_MTU_SIZE ) {
 			mtuSize = MAXIMUM_MTU_SIZE;
 		}
@@ -308,30 +309,6 @@ class ServerConnection extends Connection {
 	private void sendConnectionRequestFailed() {
 		// Simply send NO_FREE_INCOMING_CONNECTIONS
 		this.sendNoFreeIncomingConnections();
-	}
-
-	@Override
-	public void send( byte[] data ) {
-		super.send( data );
-		this.server.wakeUpdate();
-	}
-
-	@Override
-	public void send( PacketReliability reliability, byte[] data ) {
-		super.send( reliability, data );
-		this.server.wakeUpdate();
-	}
-
-	@Override
-	public void send( PacketReliability reliability, int orderingChannel, byte[] data ) {
-		super.send( reliability, orderingChannel, data );
-		this.server.wakeUpdate();
-	}
-
-	@Override
-	public void send( PacketReliability reliability, int orderingChannel, byte[] data, int offset, int length ) {
-		super.send( reliability, orderingChannel, data, offset, length );
-		this.server.wakeUpdate();
 	}
 
 }

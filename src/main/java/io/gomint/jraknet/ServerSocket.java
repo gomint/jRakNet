@@ -9,6 +9,8 @@ import java.net.DatagramSocket;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.SocketException;
+import java.nio.ByteBuffer;
+import java.nio.channels.DatagramChannel;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -112,15 +114,27 @@ public class ServerSocket extends Socket {
 		}
 
 		// Automatically binds socket to address (no further #bind() call required)
-		this.udpSocket = new DatagramSocket( address );
+		try {
+			this.channel = DatagramChannel.open();
+			this.channel.configureBlocking( false );
+			this.udpSocket = this.channel.socket();
+			this.udpSocket.bind( address );
+
+			// Buffers ?!
+			this.udpSocket.setReceiveBufferSize( 1024 * 1024 * 8 );
+			this.udpSocket.setSendBufferSize( 1024 * 1024 * 8 );
+		} catch ( IOException e ) {
+			throw new SocketException( e.getMessage() );
+		}
+
 		this.bindAddress = address;
+
+		this.connectionsByAddress = new HashMap<>( this.maxConnections );
+		this.connectionsByGuid = new HashMap<>( this.maxConnections );
 
 		// Initialize other subsystems; won't get here if bind fails as DatagramSocket's
 		// constructor will throw SocketException:
 		this.afterInitialize();
-
-		this.connectionsByAddress = new HashMap<>( this.maxConnections );
-		this.connectionsByGuid = new HashMap<>( this.maxConnections );
 	}
 
 	/**
@@ -163,7 +177,7 @@ public class ServerSocket extends Socket {
 	 * @return Whether or not the datagram was handled by this method already and should be processed no further
 	 */
 	@Override
-	protected boolean receiveDatagram( DatagramBuffer datagram ) {
+	protected boolean receiveDatagram( DatagramPacket datagram ) {
 		// Handle unconnected pings:
 		byte packetId = datagram.getData()[0];
 		if ( packetId == UNCONNECTED_PING ) {
@@ -181,7 +195,7 @@ public class ServerSocket extends Socket {
 	 * @param time     The current system time
 	 */
 	@Override
-	protected void handleDatagram( DatagramBuffer datagram, long time ) {
+	protected void handleDatagram( DatagramPacket datagram, long time ) {
 		ServerConnection connection = this.getConnection( datagram );
 		if ( connection != null ) {
 			// #getConnection() may return null if there is currently no connection
@@ -299,7 +313,7 @@ public class ServerSocket extends Socket {
 	 * @throws IOException Thrown if the transmission fails
 	 */
 	void send( SocketAddress recipient, byte[] buffer, int offset, int length ) throws IOException {
-		this.udpSocket.send( new DatagramPacket( buffer, offset, length, recipient ) );
+		this.channel.send( ByteBuffer.wrap( buffer, offset, length ), recipient );
 	}
 
 	/**
@@ -363,7 +377,7 @@ public class ServerSocket extends Socket {
 	 *
 	 * @param datagram The datagram containing the ping request
 	 */
-	private void handleUnconnectedPing( DatagramBuffer datagram ) {
+	private void handleUnconnectedPing( DatagramPacket datagram ) {
 		// Indeed, rather ugly but avoids the relatively unnecessary cost of
 		// constructing yet another packet buffer instance:
 		byte[] buffer = datagram.getData();
@@ -386,7 +400,7 @@ public class ServerSocket extends Socket {
 		packet.writeUShort( motdBytes.length );
 		packet.writeBytes( motdBytes );
 		try {
-			this.send( datagram.address(), packet );
+			this.send( datagram.getSocketAddress(), packet );
 		} catch ( IOException ignored ) {
 			// ._.
 		}
@@ -410,16 +424,16 @@ public class ServerSocket extends Socket {
 	 * @param datagram The datagram buffer holding the actual datagram data. USed to access socket address of sender and packet ID
 	 * @return The connection of the given address or null (see above)
 	 */
-	private ServerConnection getConnection( DatagramBuffer datagram ) {
-		ServerConnection connection = this.connectionsByAddress.get( datagram.address() );
+	private ServerConnection getConnection( DatagramPacket datagram ) {
+		ServerConnection connection = this.connectionsByAddress.get( datagram.getSocketAddress() );
 		if ( connection == null ) {
 			// Only construct a new server connection if this datagram contains
 			// a valid OPEN_CONNECTION_REQUEST_1 packet as this might be a discarded
 			// or invalid connection receive otherwise:
 			byte packetId = datagram.getData()[0];
 			if ( packetId == OPEN_CONNECTION_REQUEST_1 ) {
-				connection = new ServerConnection( this, datagram.address(), ConnectionState.UNCONNECTED );
-				this.connectionsByAddress.put( datagram.address(), connection );
+				connection = new ServerConnection( this, datagram.getSocketAddress(), ConnectionState.UNCONNECTED );
+				this.connectionsByAddress.put( datagram.getSocketAddress(), connection );
 			}
 		}
 		return connection;

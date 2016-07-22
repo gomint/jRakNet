@@ -24,8 +24,6 @@ public class EncapsulatedPacket {
 	private byte[]            packetData            = null;
 
 	private long weight;
-	private long nextInteraction;
-	private short sendCount;
 
 	public EncapsulatedPacket() {
 
@@ -41,18 +39,6 @@ public class EncapsulatedPacket {
 		this.splitPacketId = other.splitPacketId;
 		this.splitPacketIndex = other.splitPacketIndex;
 		this.packetData = other.packetData;
-	}
-
-	public EncapsulatedPacket( PacketReliability reliability, boolean isSplitPacket, int packetLength, int reliableMessageNumber, int sequencingIndex, int orderingIndex, byte orderingChannel, long splitPacketCount, int splitPacketId, long splitPacketIndex, byte[] packetData ) {
-		this.reliability = reliability;
-		this.reliableMessageNumber = reliableMessageNumber;
-		this.sequencingIndex = sequencingIndex;
-		this.orderingIndex = orderingIndex;
-		this.orderingChannel = orderingChannel;
-		this.splitPacketCount = splitPacketCount;
-		this.splitPacketId = splitPacketId;
-		this.splitPacketIndex = splitPacketIndex;
-		this.packetData = packetData;
 	}
 
 	/**
@@ -279,19 +265,4 @@ public class EncapsulatedPacket {
 		this.weight = weight;
 	}
 
-	public long getNextInteraction() {
-		return nextInteraction;
-	}
-
-	public void setNextInteraction( long nextInteraction ) {
-		this.nextInteraction = nextInteraction;
-	}
-
-	public int getSendCount() {
-		return this.sendCount;
-	}
-
-	public void incrementSendCount() {
-		++this.sendCount;
-	}
 }

@@ -71,7 +71,7 @@ class ClientConnection extends Connection {
 	}
 
 	@Override
-	protected boolean handleDatagram0( DatagramBuffer datagram, long time ) {
+	protected boolean handleDatagram0( DatagramPacket datagram, long time ) {
 		this.lastPingTime = time;
 
 		// Handle special internal packets:
@@ -129,7 +129,7 @@ class ClientConnection extends Connection {
 
 	// ================================ PACKET HANDLERS ================================ //
 
-	private void handlePreConnectionReply1( DatagramBuffer datagram ) {
+	private void handlePreConnectionReply1( DatagramPacket datagram ) {
 		// Prevent further connection attempts:
 		this.connectionAttempts = 11;
 
@@ -147,10 +147,10 @@ class ClientConnection extends Connection {
 			return;
 		}
 
-		this.sendPreConnectionRequest2( datagram.address() );
+		this.sendPreConnectionRequest2( datagram.getSocketAddress() );
 	}
 
-	private void handlePreConnectionReply2( DatagramBuffer datagram ) {
+	private void handlePreConnectionReply2( DatagramPacket datagram ) {
 		if ( this.getState() != ConnectionState.INITIALIZING ) {
 			return;
 		}
@@ -179,20 +179,20 @@ class ClientConnection extends Connection {
 		this.initializeStructures();
 		this.setState( ConnectionState.RELIABLE );
 
-		this.sendConnectionRequest( datagram.address() );
+		this.sendConnectionRequest( datagram.getSocketAddress() );
 	}
 
-	private void handleAlreadyConnected( @SuppressWarnings( "unused" ) DatagramBuffer datagram ) {
+	private void handleAlreadyConnected( @SuppressWarnings( "unused" ) DatagramPacket datagram ) {
 		this.setState( ConnectionState.UNCONNECTED );
 		this.propagateConnectionAttemptFailed( "System is already connected" );
 	}
 
-	private void handleNoFreeIncomingConnections( @SuppressWarnings( "unused" ) DatagramBuffer datagram ) {
+	private void handleNoFreeIncomingConnections( @SuppressWarnings( "unused" ) DatagramPacket datagram ) {
 		this.setState( ConnectionState.UNCONNECTED );
 		this.propagateConnectionAttemptFailed( "Remote peer has no free incoming connections left" );
 	}
 
-	private void handleConnectionRequestFailed( @SuppressWarnings( "unused" ) DatagramBuffer datagram ) {
+	private void handleConnectionRequestFailed( @SuppressWarnings( "unused" ) DatagramPacket datagram ) {
 		this.setState( ConnectionState.UNCONNECTED );
 		this.propagateConnectionAttemptFailed( "Remote peer rejected connection request" );
 	}
@@ -286,30 +286,6 @@ class ClientConnection extends Connection {
 		buffer.writeLong( System.currentTimeMillis() );
 
 		this.send( PacketReliability.RELIABLE_ORDERED, 0, buffer.getBuffer() );
-	}
-
-	@Override
-	public void send( byte[] data ) {
-		super.send( data );
-		this.client.wakeUpdate();
-	}
-
-	@Override
-	public void send( PacketReliability reliability, byte[] data ) {
-		super.send( reliability, data );
-		this.client.wakeUpdate();
-	}
-
-	@Override
-	public void send( PacketReliability reliability, int orderingChannel, byte[] data ) {
-		super.send( reliability, orderingChannel, data );
-		this.client.wakeUpdate();
-	}
-
-	@Override
-	public void send( PacketReliability reliability, int orderingChannel, byte[] data, int offset, int length ) {
-		super.send( reliability, orderingChannel, data, offset, length );
-		this.client.wakeUpdate();
 	}
 
 }
