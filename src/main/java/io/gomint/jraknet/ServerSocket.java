@@ -391,7 +391,11 @@ public class ServerSocket extends Socket {
 		                      ( (long) buffer[index++] << 8 ) |
 		                      ( (long) buffer[index] ) );
 
-		byte[] motdBytes = String.format( MOTD_FORMAT, this.motd, this.activeConnections.size(), this.maxConnections ).getBytes( StandardCharsets.US_ASCII );
+		// Let the SocketEventHandler decide what to send
+		SocketEvent.PingPongInfo info = new SocketEvent.PingPongInfo( datagram.getSocketAddress(), sendPingTime, sendPingTime, -1, this.motd, this.activeConnections.size(), this.maxConnections );
+		this.propagateEvent( new SocketEvent( SocketEvent.Type.UNCONNECTED_PING, info ) );
+
+		byte[] motdBytes = String.format( MOTD_FORMAT, info.getMotd(), info.getOnlineUsers(), info.getMaxUsers() ).getBytes( StandardCharsets.US_ASCII );
 		PacketBuffer packet = new PacketBuffer( 35 + motdBytes.length );
 		packet.writeByte( UNCONNECTED_PONG );
 		packet.writeLong( sendPingTime );

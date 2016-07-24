@@ -45,7 +45,13 @@ public class SocketEvent {
 		/**
 		 * Notifies that a client connection's connection attempt succeeded.
 		 */
-		CONNECTION_ATTEMPT_SUCCEEDED;
+		CONNECTION_ATTEMPT_SUCCEEDED,
+
+		/**
+		 * Notifies that a server socket has gotten a unconnected ping. Events of this type are guaranteed to possess
+		 * data which can be modified to the unconnected pong response (motd)
+         */
+		UNCONNECTED_PING;
 
 	}
 
@@ -55,7 +61,11 @@ public class SocketEvent {
 		private final long          pingTime;
 		private final long          pongTime;
 		private final long          remoteGuid;
-		private final String        motd;
+		private String              motd;
+
+		// Ping specific
+		private int                 onlineUsers;
+		private int                 maxUsers;
 
 		PingPongInfo( final SocketAddress address, final long pingTime, final long pongTime, final long remoteGuid, final String motd ) {
 			this.address = address;
@@ -64,6 +74,12 @@ public class SocketEvent {
 			this.remoteGuid = remoteGuid;
 			this.motd = motd;
 		}
+
+        PingPongInfo( final SocketAddress address, final long pingTime, final long pongTime, final long remoteGuid, final String motd, final int onlineUsers, final int maxUsers ) {
+            this( address, pingTime, pongTime, remoteGuid, motd );
+            this.onlineUsers = onlineUsers;
+            this.maxUsers = maxUsers;
+        }
 
 		public SocketAddress getAddress() {
 			return this.address;
@@ -83,6 +99,26 @@ public class SocketEvent {
 
 		public String getMotd() {
 			return this.motd;
+		}
+
+		public void setMotd(String motd) {
+			this.motd = motd;
+		}
+
+		public int getOnlineUsers() {
+			return this.onlineUsers;
+		}
+
+		public void setOnlineUsers(int onlineUsers) {
+			this.onlineUsers = onlineUsers;
+		}
+
+		public int getMaxUsers() {
+			return this.maxUsers;
+		}
+
+		public void setMaxUsers(int maxUsers) {
+			this.maxUsers = maxUsers;
 		}
 
 	}
@@ -138,7 +174,7 @@ public class SocketEvent {
 	 * @return The ping pong information of the event
 	 */
 	public PingPongInfo getPingPongInfo() {
-		if ( this.type == Type.UNCONNECTED_PONG ) {
+		if ( this.type == Type.UNCONNECTED_PONG || this.type == Type.UNCONNECTED_PING ) {
 			return (PingPongInfo) this.data;
 		}
 		return null;
