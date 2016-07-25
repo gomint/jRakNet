@@ -1,9 +1,6 @@
 package io.gomint.jraknet;
 
-import io.gomint.jraknet.datastructures.BinaryOrderingHeap;
-import io.gomint.jraknet.datastructures.BitQueue;
-import io.gomint.jraknet.datastructures.OrderingHeap;
-import io.gomint.jraknet.datastructures.TriadRange;
+import io.gomint.jraknet.datastructures.*;
 import org.slf4j.Logger;
 
 import java.io.IOException;
@@ -28,6 +25,7 @@ import static io.gomint.jraknet.RakNetConstraints.*;
  */
 public abstract class Connection {
 
+    public static final int DEFAULT_RESEND_TIMEOUT = 500;
     protected static final InetSocketAddress[] LOCAL_IP_ADDRESSES = new InetSocketAddress[]{ new InetSocketAddress( "127.0.0.1", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ) };
 
     // Connection Metadata
@@ -66,6 +64,11 @@ public abstract class Connection {
     private int nextSplitPacketID;
     private List<TriadRange> outgoingACKs;
     private List<TriadRange> outgoingNAKs;
+
+    // Resending
+    private FixedSizeRRBuffer<EncapsulatedPacket> resendBuffer;
+    private BlockingQueue<EncapsulatedPacket> resendQueue;
+    private FixedSizeRRBuffer<DatagramContentNode> datagramContentBuffer;
 
     // Disconnect
     private String disconnectMessage;
@@ -192,7 +195,7 @@ public abstract class Connection {
 
     /**
      * Receives one or more data packets. This method does block until either data arrives or the socket closes.
-     *
+     * <p>
      * <p>
      * Each invocation of this method will return exactly zero or one data packets.
      * As long as this method returns non-null byte arrays there might still be more
@@ -308,9 +311,6 @@ public abstract class Connection {
             // Add it to the send buffer immediately:
             this.sendBuffer.offer( packet );
         }
-
-        // Send all queued packets
-        sendPacketQueued();
     }
 
     /**
@@ -493,6 +493,9 @@ public abstract class Connection {
         this.outgoingACKs = new ArrayList<>( 128 );
         this.outgoingNAKs = new ArrayList<>( 128 );
         this.sendBuffer = new LinkedBlockingQueue<>();
+        this.resendBuffer = new FixedSizeRRBuffer<>( 256 );
+        this.resendQueue = new LinkedBlockingQueue<>();
+        this.datagramContentBuffer = new FixedSizeRRBuffer<>( 256 );
     }
 
     /**
@@ -521,15 +524,89 @@ public abstract class Connection {
         this.sendBuffer = null;
         this.outgoingACKs = null;
         this.outgoingNAKs = null;
+        this.resendBuffer = null;
+        this.resendQueue = null;
+        this.datagramContentBuffer = null;
     }
 
-    private void sendPacketQueued() {
-        List<EncapsulatedPacket> sendList = new ArrayList<>();
-        int currentDatagramSize = 0;
+    private int pushPacket( List<EncapsulatedPacket> sendList, EncapsulatedPacket packet, int currentDatagramSize ) {
         int maxDatagramSize = this.mtuSize - DATA_HEADER_BYTE_LENGTH;
 
+        // Push current datagram to send queue if adding this packet would exceed the MTU:
+        int length = packet.getHeaderLength() + packet.getPacketLength();
+        if ( currentDatagramSize + length > maxDatagramSize ) {
+            // Flush out datagram:
+            PacketBuffer buffer = new PacketBuffer( this.mtuSize );
+
+            // Write datagram header:
+            byte flags = (byte) ( 0x80 | ( sendList.size() > 0 ? 0x8 : 0x0 ) );     // IsValid | (isContinuousSend)
+            buffer.writeByte( flags );
+
+            int nextDiaNumber = this.nextDatagramSequenceNumber.getAndIncrement();
+            buffer.writeTriad( nextDiaNumber );
+
+            DatagramContentNode dcn = null;
+            for ( EncapsulatedPacket encapsulatedPacket : sendList ) {
+                // Add this packet to the datagram content buffer if reliable:
+                if ( encapsulatedPacket.getReliability() != PacketReliability.UNRELIABLE && encapsulatedPacket.getReliability() != PacketReliability.UNRELIABLE_SEQUENCED ) {
+                    if ( dcn == null ) {
+                        dcn = new DatagramContentNode( encapsulatedPacket.getReliableMessageNumber() );
+                        this.datagramContentBuffer.set( nextDiaNumber, dcn );
+                    } else {
+                        dcn.setNext( new DatagramContentNode( encapsulatedPacket.getReliableMessageNumber() ) );
+                        dcn = dcn.getNext();
+                    }
+                }
+
+                encapsulatedPacket.writeToBuffer( buffer );
+            }
+            sendList.clear();
+
+            // Finally send this packet buffer to its destination:
+            try {
+                this.sendRaw( this.address, buffer );
+            } catch ( IOException e ) {
+                this.getImplementationLogger().error( "Failed to send datagram to destination", e );
+            }
+
+            currentDatagramSize = 0;
+        }
+
+        sendList.add( packet );
+        currentDatagramSize += length;
+
+        return currentDatagramSize;
+    }
+
+    private void sendPacketQueued( long time ) {
+        List<EncapsulatedPacket> sendList = new ArrayList<>();
+        int currentDatagramSize = 0;
+
+        // Resend everything scheduled for resend:
+        while ( !this.resendQueue.isEmpty() ) {
+            EncapsulatedPacket packet = this.resendQueue.peek();
+            if ( packet.getNextExecution() <= time ) {
+                // Delete packets marked for removal:
+                if ( packet.getNextExecution() == 0L ) {
+                    this.resendQueue.poll();
+                    continue;
+                }
+
+                currentDatagramSize = this.pushPacket( sendList, packet, currentDatagramSize );
+
+                this.resendQueue.poll();
+                packet.setNextExecution( time + DEFAULT_RESEND_TIMEOUT );
+                packet.incrementSendCount();
+
+                // Insert back into resend queue:
+                this.resendQueue.add( packet );
+            } else {
+                break;
+            }
+        }
+
         // Attempt to send new packets:
-        while ( !this.sendBuffer.isEmpty() ) {
+        while ( !this.sendBuffer.isEmpty() && this.resendBuffer.get( this.nextReliableMessageNumber.get() ) == null ) {
             EncapsulatedPacket packet = this.sendBuffer.poll();
             if ( packet == null ) {
                 continue;
@@ -541,36 +618,16 @@ public abstract class Connection {
                     reliability == PacketReliability.RELIABLE_SEQUENCED ||
                     reliability == PacketReliability.RELIABLE_ORDERED ) {
                 packet.setReliableMessageNumber( this.nextReliableMessageNumber.getAndIncrement() );
+
+                // Insert into resend queue:
+                packet.setNextExecution( time + DEFAULT_RESEND_TIMEOUT );
+                this.resendQueue.add( packet );
+
+                // Add to FixedSize round-robin resend buffer:
+                this.resendBuffer.set( packet.getReliableMessageNumber(), packet );
             }
 
-            // Push current datagram to send queue if adding this packet would exceed the MTU:
-            int length = packet.getHeaderLength() + packet.getPacketLength();
-            if ( currentDatagramSize + length > maxDatagramSize ) {
-                // Flush out datagram:
-                PacketBuffer buffer = new PacketBuffer( this.mtuSize );
-
-                // Write datagram header:
-                byte flags = (byte) ( 0x80 | ( sendList.size() > 0 ? 0x8 : 0x0 ) );     // IsValid | (isContinuousSend)
-                buffer.writeByte( flags );
-                buffer.writeTriad( this.nextDatagramSequenceNumber.getAndIncrement() );
-
-                for ( EncapsulatedPacket encapsulatedPacket : sendList ) {
-                    encapsulatedPacket.writeToBuffer( buffer );
-                }
-                sendList.clear();
-
-                // Finally send this packet buffer to its destination:
-                try {
-                    this.sendRaw( this.address, buffer );
-                } catch ( IOException e ) {
-                    this.getImplementationLogger().error( "Failed to send datagram to destination", e );
-                }
-
-                currentDatagramSize = 0;
-            }
-
-            sendList.add( packet );
-            currentDatagramSize += length;
+            currentDatagramSize = this.pushPacket( sendList, packet, currentDatagramSize );
         }
 
         // Push the final datagram if any is to be pushed:
@@ -581,9 +638,23 @@ public abstract class Connection {
             // Write datagram header:
             byte flags = (byte) ( 0x80 | ( sendList.size() > 0 ? 0x8 : 0x0 ) );     // IsValid | (isContinuousSend)
             buffer.writeByte( flags );
-            buffer.writeTriad( this.nextDatagramSequenceNumber.getAndIncrement() );
 
+            int nextDiaNumber = this.nextDatagramSequenceNumber.getAndIncrement();
+            buffer.writeTriad( nextDiaNumber );
+
+            DatagramContentNode dcn = null;
             for ( EncapsulatedPacket encapsulatedPacket : sendList ) {
+                // Add this packet to the datagram content buffer if reliable:
+                if ( encapsulatedPacket.getReliability() != PacketReliability.UNRELIABLE && encapsulatedPacket.getReliability() != PacketReliability.UNRELIABLE_SEQUENCED ) {
+                    if ( dcn == null ) {
+                        dcn = new DatagramContentNode( encapsulatedPacket.getReliableMessageNumber() );
+                        this.datagramContentBuffer.set( nextDiaNumber, dcn );
+                    } else {
+                        dcn.setNext( new DatagramContentNode( encapsulatedPacket.getReliableMessageNumber() ) );
+                        dcn = dcn.getNext();
+                    }
+                }
+
                 encapsulatedPacket.writeToBuffer( buffer );
             }
             sendList.clear();
@@ -616,6 +687,8 @@ public abstract class Connection {
 
         this.sendACKs();
         this.sendNAKs();
+
+        this.sendPacketQueued( time );
 
         this.postUpdate( time );
 
@@ -709,11 +782,48 @@ public abstract class Connection {
     // ================================ ACKs AND NAKs ================================ //
 
     private void handleACKs( PacketBuffer buffer ) {
+        TriadRange[] ranges = buffer.readTriadRangeList();
+        if ( ranges == null ) {
+            return;
+        }
 
+        for ( int i = 0; i < ranges.length; ++i ) {
+            for ( int j = ranges[i].getMin(); j <= ranges[i].getMax(); ++j ) {
+                // Remove all packets contained in the ACKed datagram from the resend buffer:
+                DatagramContentNode node = this.datagramContentBuffer.get( j );
+                while ( node != null ) {
+                    EncapsulatedPacket packet = this.resendBuffer.get( node.getReliableMessageNumber() );
+                    if ( packet != null ) {
+                        // Enforce deletion on next interaction:
+                        packet.setNextExecution( 0L );
+                        this.resendBuffer.set( node.getReliableMessageNumber(), null );
+                    }
+                    node = node.getNext();
+                }
+            }
+        }
     }
 
     private void handleNAKs( PacketBuffer buffer ) {
+        TriadRange[] ranges = buffer.readTriadRangeList();
+        if ( ranges == null ) {
+            return;
+        }
 
+        for ( int i = 0; i < ranges.length; ++i ) {
+            for ( int j = ranges[i].getMin(); j <= ranges[i].getMax(); ++j ) {
+                // Enforce immediate resend:
+                DatagramContentNode node = this.datagramContentBuffer.get( j );
+                while ( node != null ) {
+                    EncapsulatedPacket packet = this.resendBuffer.get( node.getReliableMessageNumber() );
+                    if ( packet != null ) {
+                        // Enforce instant resend on next interaction:
+                        packet.setNextExecution( 1L );
+                    }
+                    node = node.getNext();
+                }
+            }
+        }
     }
 
     private void sendACKs() {

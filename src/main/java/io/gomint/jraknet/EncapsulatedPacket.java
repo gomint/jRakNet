@@ -24,6 +24,8 @@ public class EncapsulatedPacket {
 	private byte[]            packetData            = null;
 
 	private long weight;
+	private long nextExecution;
+	private int resendCount;
 
 	public EncapsulatedPacket() {
 
@@ -263,6 +265,18 @@ public class EncapsulatedPacket {
 
 	public void setWeight( long weight ) {
 		this.weight = weight;
+	}
+
+	public long getNextExecution() {
+		return nextExecution;
+	}
+
+	public void setNextExecution( long nextExecution ) {
+		this.nextExecution = nextExecution;
+	}
+
+	public void incrementSendCount() {
+		this.resendCount++;
 	}
 
 }

@@ -365,9 +365,9 @@ public abstract class Socket implements AutoCloseable {
             this.updateConnections( start );
 
             long time = System.currentTimeMillis() - start;
-            if ( time < 50 ) {
+            if ( time < 10 ) {
                 try {
-                    Thread.sleep( 50 - time );
+                    Thread.sleep( 10 - time );
                 } catch ( InterruptedException e ) {
                     // Ignore .-.
                 }
