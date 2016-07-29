@@ -16,6 +16,8 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 import static io.gomint.jraknet.RakNetConstraints.*;
 
@@ -63,7 +65,9 @@ public abstract class Connection {
     private AtomicInteger nextReliableMessageNumber = new AtomicInteger( 0 );
     private int nextSplitPacketID;
     private List<TriadRange> outgoingACKs;
+    private Lock sendingACKsLock = new ReentrantLock( true );
     private List<TriadRange> outgoingNAKs;
+    private Lock sendingNAKsLock = new ReentrantLock( true );
 
     // Resending
     private FixedSizeRRBuffer<EncapsulatedPacket> resendBuffer;
@@ -843,20 +847,35 @@ public abstract class Connection {
     }
 
     private void sendACKs() {
-        if ( this.outgoingACKs.size() > 0 ) {
-            int maxSize = this.mtuSize - DATA_HEADER_BYTE_LENGTH;
-            PacketBuffer buffer = new PacketBuffer( this.mtuSize );
+        // Fast out in sending when there is nothing to do
+        this.sendingACKsLock.lock();
+        try {
+            if ( this.outgoingACKs.size() == 0 ) return;
+        } finally {
+            this.sendingACKsLock.unlock();
+        }
 
-            // IsValid | IsACK
-            byte flags = (byte) 0x80 | (byte) 0x40;
-            buffer.writeByte( flags );
+        int maxSize = this.mtuSize - DATA_HEADER_BYTE_LENGTH;
+        PacketBuffer buffer = new PacketBuffer( this.mtuSize );
 
-            // Serialize ACKs into buffer and remove them afterwards:
-            int count = buffer.writeTriadRangeList( this.outgoingACKs, 0, this.outgoingACKs.size(), maxSize );
-            for ( int i = 0; i < count; i++ ) {
-                this.outgoingACKs.remove( 0 );
+        // IsValid | IsACK
+        byte flags = (byte) 0x80 | (byte) 0x40;
+        buffer.writeByte( flags );
+
+        this.sendingACKsLock.lock();
+        try {
+            if ( this.outgoingACKs.size() > 0 ) {
+                // Serialize ACKs into buffer and remove them afterwards:
+                int count = buffer.writeTriadRangeList( this.outgoingACKs, 0, this.outgoingACKs.size(), maxSize );
+                for ( int i = 0; i < count; i++ ) {
+                    this.outgoingACKs.remove( 0 );
+                }
             }
+        } finally {
+            this.sendingACKsLock.unlock();
+        }
 
+        if ( buffer.getPosition() > 1 ) {
             // Send this data directly:
             try {
                 this.sendRaw( this.address, buffer );
@@ -867,20 +886,36 @@ public abstract class Connection {
     }
 
     private void sendNAKs() {
-        if ( this.outgoingNAKs.size() > 0 ) {
-            int maxSize = this.mtuSize - DATA_HEADER_BYTE_LENGTH;
-            PacketBuffer buffer = new PacketBuffer( this.mtuSize );
+        // Fast out in sending when there is nothing to do
+        this.sendingNAKsLock.lock();
+        try {
+            if ( this.outgoingNAKs.size() == 0 ) return;
+        } finally {
+            this.sendingNAKsLock.unlock();
+        }
 
-            // IsValid | IsNAK
-            byte flags = (byte) 0x80 | (byte) 0x20;
-            buffer.writeByte( flags );
+        int maxSize = this.mtuSize - DATA_HEADER_BYTE_LENGTH;
+        PacketBuffer buffer = new PacketBuffer( this.mtuSize );
 
-            // Serialize ACKs into buffer and remove them afterwards:
-            int count = buffer.writeTriadRangeList( this.outgoingNAKs, 0, this.outgoingNAKs.size(), maxSize );
-            for ( int i = 0; i < count; i++ ) {
-                this.outgoingNAKs.remove( 0 );
+        // IsValid | IsNAK
+        byte flags = (byte) 0x80 | (byte) 0x20;
+        buffer.writeByte( flags );
+
+        this.sendingNAKsLock.lock();
+        try {
+            if ( this.outgoingNAKs.size() > 0 ) {
+                // Serialize ACKs into buffer and remove them afterwards:
+                int count = buffer.writeTriadRangeList( this.outgoingNAKs, 0, this.outgoingNAKs.size(), maxSize );
+                for ( int i = 0; i < count; i++ ) {
+                    this.outgoingNAKs.remove( 0 );
+                }
             }
+        } finally {
+            this.sendingNAKsLock.unlock();
+        }
 
+        // Only send when more data than the flag has been written
+        if ( buffer.getPosition() > 1 ) {
             // Send this data directly:
             try {
                 this.sendRaw( this.address, buffer );
@@ -940,23 +975,33 @@ public abstract class Connection {
 
         // NAK all datagrams missing in between:
         if ( skippedMessageCount > 0 ) {
-            this.outgoingNAKs.add( new TriadRange( datagramSequenceNumber - skippedMessageCount, datagramSequenceNumber ) );
+            this.sendingNAKsLock.lock();
+            try {
+                this.outgoingNAKs.add( new TriadRange( datagramSequenceNumber - skippedMessageCount, datagramSequenceNumber ) );
+            } finally {
+                this.sendingNAKsLock.unlock();
+            }
         }
 
         // ACK this datagram:
-        if ( this.outgoingACKs.size() > 0 ) {
-            TriadRange lastAdded = this.outgoingACKs.get( this.outgoingACKs.size() - 1 );
-            if ( lastAdded != null ) {
-                if ( lastAdded.getMax() + 1 == datagramSequenceNumber ) {
-                    lastAdded.setMax( datagramSequenceNumber );
+        this.sendingACKsLock.lock();
+        try {
+            if ( this.outgoingACKs.size() > 0 ) {
+                TriadRange lastAdded = this.outgoingACKs.get( this.outgoingACKs.size() - 1 );
+                if ( lastAdded != null ) {
+                    if ( lastAdded.getMax() + 1 == datagramSequenceNumber ) {
+                        lastAdded.setMax( datagramSequenceNumber );
+                    } else {
+                        this.outgoingACKs.add( new TriadRange( datagramSequenceNumber, datagramSequenceNumber ) );
+                    }
                 } else {
                     this.outgoingACKs.add( new TriadRange( datagramSequenceNumber, datagramSequenceNumber ) );
                 }
             } else {
                 this.outgoingACKs.add( new TriadRange( datagramSequenceNumber, datagramSequenceNumber ) );
             }
-        } else {
-            this.outgoingACKs.add( new TriadRange( datagramSequenceNumber, datagramSequenceNumber ) );
+        } finally {
+            this.sendingACKsLock.unlock();
         }
 
         EncapsulatedPacket packet = new EncapsulatedPacket();
