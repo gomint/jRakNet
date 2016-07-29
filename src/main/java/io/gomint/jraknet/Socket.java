@@ -297,10 +297,7 @@ public abstract class Socket implements AutoCloseable {
                 if ( readyChannels == 0 ) continue;
 
                 Set<SelectionKey> selectedKeys = selector.selectedKeys();
-                Iterator<SelectionKey> keyIterator = selectedKeys.iterator();
-                while ( keyIterator.hasNext() ) {
-                    SelectionKey key = keyIterator.next();
-
+                for ( SelectionKey key : selectedKeys ) {
                     // ---------------------------------------------------------------------------
                     // Allocate a 2^16 bytes long buffer
                     // ---------------------------------------------------------------------------
@@ -348,9 +345,9 @@ public abstract class Socket implements AutoCloseable {
                     } catch ( Exception e ) {
                         e.printStackTrace();
                     }
-
-                    keyIterator.remove();
                 }
+
+                selectedKeys.clear();
             }
         } catch ( IOException e ) {
             e.printStackTrace();
