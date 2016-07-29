@@ -141,6 +141,7 @@ public abstract class Socket implements AutoCloseable {
         this.udpSocket.close();
         this.udpSocket = null;
 
+        this.receiveThread.interrupt();
         try {
             this.receiveThread.join();
         } catch ( InterruptedException e ) {
