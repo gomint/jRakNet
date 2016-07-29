@@ -293,7 +293,7 @@ public abstract class Socket implements AutoCloseable {
             this.channel.register( selector, SelectionKey.OP_READ );
 
             while ( this.running.get() ) {
-                int readyChannels = selector.select();
+                int readyChannels = selector.select( 1000 );
                 if ( readyChannels == 0 ) continue;
 
                 Set<SelectionKey> selectedKeys = selector.selectedKeys();
@@ -367,9 +367,9 @@ public abstract class Socket implements AutoCloseable {
             this.updateConnections( start );
 
             long time = System.currentTimeMillis() - start;
-            if ( time < 5 ) {
+            if ( time < 2 ) {
                 try {
-                    Thread.sleep( 5 - time );
+                    Thread.sleep( 2 - time );
                 } catch ( InterruptedException e ) {
                     e.printStackTrace();
                 }
