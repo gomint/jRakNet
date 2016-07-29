@@ -73,6 +73,10 @@ public abstract class Connection {
     // Disconnect
     private String disconnectMessage;
 
+    // Ping / Pong:
+    protected long lastPingTime;
+    protected long lastPongTime;
+
     // ================================ CONSTRUCTORS ================================ //
 
     Connection( SocketAddress address, ConnectionState initialState ) {
@@ -82,6 +86,16 @@ public abstract class Connection {
     }
 
     // ================================ PUBLIC API ================================ //
+
+    /**
+     * Get the ping of the underlying connection. This is done by sending ping packets every 2 seconds. So this
+     * is not realtime
+     *
+     * @return
+     */
+    public long getPing() {
+        return this.lastPongTime - this.lastPingTime;
+    }
 
     /**
      * Gets the address of the connection's remote peer.
@@ -388,7 +402,9 @@ public abstract class Connection {
      * @param time The current system time
      */
     protected void preUpdate( long time ) {
-
+        if ( this.isConnected() && this.lastPingTime + 2000L < time ) {
+            this.sendConnectedPing( time );
+        }
     }
 
     /**
@@ -1122,17 +1138,12 @@ public abstract class Connection {
 
     private void handleConnectedPing( EncapsulatedPacket packet ) {
         PacketBuffer buffer = new PacketBuffer( packet.getPacketData(), 0 );
-        buffer.skip( 1 );                                      // Packet ID
-        long pingTime = buffer.readLong();                     // Ping Time
-
-        // Respond with pong packet
-        // If one would like to detect latencies this would be the go-to place:
-        this.sendConnectedPong( pingTime );
+        buffer.skip( 1 );
+        this.sendConnectedPong( buffer.readLong() );
     }
 
     private void handleConnectedPong( @SuppressWarnings( "unused" ) EncapsulatedPacket packet ) {
-        // If there should ever be an interest of calculating connection latency
-        // this would be the go-to place
+        this.lastPongTime = System.currentTimeMillis();
     }
 
     private void handleDisconnectionNotification( @SuppressWarnings( "unused" ) EncapsulatedPacket packet ) {
@@ -1143,11 +1154,18 @@ public abstract class Connection {
 
     // ================================ PACKET SENDERS ================================ //
 
+    private void sendConnectedPing( long time ) {
+        PacketBuffer buffer = new PacketBuffer( 9 );
+        buffer.writeByte( CONNECTED_PING );
+        buffer.writeLong( time );
+        this.send( PacketReliability.UNRELIABLE, 0, buffer.getBuffer() );
+        this.lastPingTime = System.currentTimeMillis();
+    }
+
     private void sendConnectedPong( long pingTime ) {
-        PacketBuffer buffer = new PacketBuffer( 17 );
+        PacketBuffer buffer = new PacketBuffer( 9 );
         buffer.writeByte( CONNECTED_PONG );
         buffer.writeLong( pingTime );
-        buffer.writeLong( System.currentTimeMillis() );
         this.send( PacketReliability.UNRELIABLE, buffer.getBuffer() );
     }
 

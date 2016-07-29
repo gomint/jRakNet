@@ -16,6 +16,7 @@ import java.util.Iterator;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Condition;
@@ -359,18 +360,23 @@ public abstract class Socket implements AutoCloseable {
     private void update() {
         long start;
 
+        Lock lock = new ReentrantLock();
+        Condition condition = lock.newCondition();
         while ( this.running.get() ) {
-            start = System.currentTimeMillis();
+            start = System.nanoTime();
 
             // Update all connections:
-            this.updateConnections( start );
+            this.updateConnections( TimeUnit.NANOSECONDS.toMillis( start ) );
 
-            long time = System.currentTimeMillis() - start;
-            if ( time < 10 ) {
+            long time = System.nanoTime() - start;
+            if ( time < 500000 ) {
+                lock.lock();
                 try {
-                    Thread.sleep( 10 - time );
+                    condition.await( time, TimeUnit.NANOSECONDS );
                 } catch ( InterruptedException e ) {
                     // Ignore .-.
+                } finally {
+                    lock.unlock();
                 }
             }
         }

@@ -21,9 +21,6 @@ class ClientConnection extends Connection {
 	private int connectionAttempts;
 	private long lastConnectionAttempt;
 
-	// Ping / Pong:
-	private long lastPingTime;
-
 	public ClientConnection( ClientSocket client, SocketAddress address, ConnectionState initialState ) {
 		super( address, initialState );
 		this.client = client;
@@ -45,9 +42,7 @@ class ClientConnection extends Connection {
 
 	@Override
 	protected void preUpdate( long time ) {
-		if ( this.isConnected() && this.lastPingTime + 2000L < time ) {
-			this.sendConnectedPing( time );
-		}
+		super.preUpdate( time );
 
 		if ( this.connectionAttempts > 10 ) {
 			// Nothing to update anymore
@@ -218,14 +213,6 @@ class ClientConnection extends Connection {
 	}
 
 	// ================================ PACKET SENDERS ================================ //
-
-	private void sendConnectedPing( long time ) {
-		PacketBuffer buffer = new PacketBuffer( 9 );
-		buffer.writeByte( CONNECTED_PING );
-		buffer.writeLong( time );
-		this.send( PacketReliability.RELIABLE, 0, buffer.getBuffer() );
-		this.lastPingTime = time;
-	}
 
 	private void sendPreConnectionRequest1( SocketAddress recipient, int mtuSize ) {
 		this.setState( ConnectionState.INITIALIZING );
