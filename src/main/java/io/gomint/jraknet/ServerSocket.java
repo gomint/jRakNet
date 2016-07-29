@@ -17,6 +17,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static io.gomint.jraknet.RakNetConstraints.*;
 
@@ -129,8 +130,8 @@ public class ServerSocket extends Socket {
 
 		this.bindAddress = address;
 
-		this.connectionsByAddress = new HashMap<>( this.maxConnections );
-		this.connectionsByGuid = new HashMap<>( this.maxConnections );
+		this.connectionsByAddress = new ConcurrentHashMap<>( this.maxConnections );
+		this.connectionsByGuid = new ConcurrentHashMap<>( this.maxConnections );
 
 		// Initialize other subsystems; won't get here if bind fails as DatagramSocket's
 		// constructor will throw SocketException:
