@@ -360,23 +360,18 @@ public abstract class Socket implements AutoCloseable {
     private void update() {
         long start;
 
-        Lock lock = new ReentrantLock();
-        Condition condition = lock.newCondition();
         while ( this.running.get() ) {
-            start = System.nanoTime();
+            start = System.currentTimeMillis();
 
             // Update all connections:
-            this.updateConnections( TimeUnit.NANOSECONDS.toMillis( start ) );
+            this.updateConnections( start );
 
-            long time = System.nanoTime() - start;
-            if ( time < 500000 ) {
-                lock.lock();
+            long time = System.currentTimeMillis() - start;
+            if ( time < 5 ) {
                 try {
-                    condition.await( time, TimeUnit.NANOSECONDS );
+                    Thread.sleep( 5 - time );
                 } catch ( InterruptedException e ) {
-                    // Ignore .-.
-                } finally {
-                    lock.unlock();
+                    e.printStackTrace();
                 }
             }
         }
