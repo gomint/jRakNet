@@ -1006,6 +1006,15 @@ public abstract class Connection {
 
         EncapsulatedPacket packet = new EncapsulatedPacket();
         while ( buffer.getPosition() - buffer.getBufferOffset() < datagram.getLength() && packet.readFromBuffer( buffer ) ) {
+            // Handle split packets
+            if ( packet.isSplitPacket() ) {
+                packet = this.rebuildSplitPacket( packet );
+                if ( packet == null ) {
+                    packet = new EncapsulatedPacket();
+                    continue;
+                }
+            }
+
             PacketReliability reliability = packet.getReliability();
             int orderingIndex = packet.getOrderingIndex();
             byte orderingChannel = packet.getOrderingChannel();
@@ -1052,15 +1061,6 @@ public abstract class Connection {
                 while ( !this.reliableMessageQueue.isEmpty() && !this.reliableMessageQueue.peek() ) {
                     this.reliableMessageQueue.poll();
                     ++this.expectedReliableMessageNumber;
-                }
-            }
-
-            // Handle split packets
-            if ( packet.isSplitPacket() ) {
-                packet = this.rebuildSplitPacket( packet );
-                if ( packet == null ) {
-                    packet = new EncapsulatedPacket();
-                    continue;
                 }
             }
 
