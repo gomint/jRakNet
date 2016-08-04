@@ -16,16 +16,12 @@ class SplitPacketAssembler {
     public SplitPacketAssembler( EncapsulatedPacket packet ) {
         this.parts = new EncapsulatedPacket[(int) packet.getSplitPacketCount()];
         this.found = 0;
-
-        logger.debug( "Wanting to assemble " + packet.getSplitPacketCount() + " packets back into original packet" );
     }
 
     public EncapsulatedPacket add( EncapsulatedPacket packet ) {
         if ( packet.getSplitPacketIndex() < this.parts.length && this.parts[(int) packet.getSplitPacketIndex()] == null ) {
             this.parts[(int) packet.getSplitPacketIndex()] = packet;
             this.found++;
-
-            logger.debug( "Got split packet part #" + packet.getSplitPacketIndex() + ". Need " + ( this.parts.length - this.found ) + " more till packet is completed" );
 
             if ( this.found == this.parts.length ) {
                 return this.rebuild();
