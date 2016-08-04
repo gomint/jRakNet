@@ -2,6 +2,7 @@ package io.gomint.jraknet;
 
 import io.gomint.jraknet.datastructures.*;
 import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.DatagramPacket;
@@ -27,6 +28,7 @@ import static io.gomint.jraknet.RakNetConstraints.*;
  */
 public abstract class Connection {
 
+    private static final Logger logger = LoggerFactory.getLogger( Connection.class );
     public static final int DEFAULT_RESEND_TIMEOUT = 500;
     protected static final InetSocketAddress[] LOCAL_IP_ADDRESSES = new InetSocketAddress[]{ new InetSocketAddress( "127.0.0.1", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ) };
 
@@ -933,6 +935,8 @@ public abstract class Connection {
             return;
         }
 
+        logger.debug( "Got data: " + toHexString( datagram.getData() ) );
+
         // Deserialize datagram header:
         PacketBuffer buffer = new PacketBuffer( datagram.getData(), 0 );
         byte flags = buffer.readByte();
@@ -1138,6 +1142,16 @@ public abstract class Connection {
 
             packet = new EncapsulatedPacket();
         }
+    }
+
+    private String toHexString( byte[] data ) {
+        StringBuilder stringBuilder = new StringBuilder();
+
+        for ( byte b : data ) {
+            stringBuilder.append( "0x" ).append( Integer.toHexString( b & 0xFF ) ).append( " " );
+        }
+
+        return stringBuilder.toString();
     }
 
     private void pushReceivedPacket( EncapsulatedPacket packet ) {
