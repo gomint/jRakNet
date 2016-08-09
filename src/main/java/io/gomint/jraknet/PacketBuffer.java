@@ -67,6 +67,11 @@ public class PacketBuffer {
 		return (short) ( ( this.buffer[this.position++] & 0xFF ) << 8 | ( this.buffer[this.position++] & 0xFF ) );
 	}
 
+	public short readLShort() {
+		this.ensureRemaining( 2 );
+		return (short) ( ( this.buffer[this.position++] & 0xFF ) | ( this.buffer[this.position++] & 0xFF ) << 8 );
+	}
+
 	public float readFloat() {
 		return Float.intBitsToFloat( this.readInt() );
 	}
