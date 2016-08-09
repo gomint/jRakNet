@@ -111,7 +111,7 @@ public class EncapsulatedPacket {
         // This is a nasty hack to get around https://bugs.mojang.com/browse/MCPE-16450
         // TODO: Remove this when issue got resolved
         int currentPosition = buffer.getPosition();
-        if ( this.reliability == PacketReliability.RELIABLE && buffer.readByte() == (byte) 0xFE && buffer.readByte() == (byte) 0x06 ) {
+        if ( buffer.readByte() == (byte) 0xFE && buffer.readByte() == (byte) 0x06 ) {
             // This is a MCPE batched packet. Look ahead for the compressed size and check if it overflows Raknets bit length short
             int compressedLength = buffer.readInt();
             int newPacketSize = compressedLength + ( buffer.getPosition() - currentPosition );
