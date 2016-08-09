@@ -1,6 +1,8 @@
 package io.gomint.jraknet;
 
-import static io.gomint.jraknet.RakNetConstraints.MAXIMUM_MTU_SIZE;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import static io.gomint.jraknet.RakNetConstraints.NUM_ORDERING_CHANNELS;
 
 /**
@@ -13,285 +15,294 @@ import static io.gomint.jraknet.RakNetConstraints.NUM_ORDERING_CHANNELS;
 // @Deprecated
 public class EncapsulatedPacket {
 
-	private PacketReliability reliability           = null;
-	private int               reliableMessageNumber = -1;
-	private int               sequencingIndex       = -1;
-	private int               orderingIndex         = -1;
-	private byte              orderingChannel       = 0;
-	private long              splitPacketCount      = 0;
-	private int               splitPacketId         = 0;
-	private long              splitPacketIndex      = 0;
-	private byte[]            packetData            = null;
+    private static final Logger logger = LoggerFactory.getLogger( EncapsulatedPacket.class );
 
-	private long weight;
-	private long nextExecution;
-	private int resendCount;
+    private PacketReliability reliability = null;
+    private int reliableMessageNumber = -1;
+    private int sequencingIndex = -1;
+    private int orderingIndex = -1;
+    private byte orderingChannel = 0;
+    private long splitPacketCount = 0;
+    private int splitPacketId = 0;
+    private long splitPacketIndex = 0;
+    private byte[] packetData = null;
 
-	public EncapsulatedPacket() {
+    private long weight;
+    private long nextExecution;
+    private int resendCount;
 
-	}
+    public EncapsulatedPacket() {
 
-	public EncapsulatedPacket( EncapsulatedPacket other ) {
-		this.reliability = other.reliability;
-		this.reliableMessageNumber = other.reliableMessageNumber;
-		this.sequencingIndex = other.sequencingIndex;
-		this.orderingIndex = other.orderingIndex;
-		this.orderingChannel = other.orderingChannel;
-		this.splitPacketCount = other.splitPacketCount;
-		this.splitPacketId = other.splitPacketId;
-		this.splitPacketIndex = other.splitPacketIndex;
-		this.packetData = other.packetData;
-	}
+    }
 
-	/**
-	 * Attempts to read the encapsulated from a datagram's raw data buffer.
-	 *
-	 * @param buffer The data buffer to read from
-	 *
-	 * @return Whether or not the encapsulated packet was read successfully
-	 */
-	public boolean readFromBuffer( PacketBuffer buffer ) {
-		if ( buffer.getRemaining() < 3 ) {
-			return false;
-		}
+    public EncapsulatedPacket( EncapsulatedPacket other ) {
+        this.reliability = other.reliability;
+        this.reliableMessageNumber = other.reliableMessageNumber;
+        this.sequencingIndex = other.sequencingIndex;
+        this.orderingIndex = other.orderingIndex;
+        this.orderingChannel = other.orderingChannel;
+        this.splitPacketCount = other.splitPacketCount;
+        this.splitPacketId = other.splitPacketId;
+        this.splitPacketIndex = other.splitPacketIndex;
+        this.packetData = other.packetData;
+    }
 
-		// Decode the packet:
-		byte flags = buffer.readByte();
-		this.reliability = PacketReliability.getFromId( (byte) ( ( flags & 0xE0 ) >>> 5 ) );
-		boolean isSplitPacket = ( flags & 0x10 ) != 0;
-		int packetLength = ( buffer.readUShort() + 7 ) >> 3;
-		this.reliableMessageNumber = -1;
-		this.sequencingIndex = -1;
-		this.orderingIndex = -1;
-		this.orderingChannel = 0;
-		this.splitPacketCount = 0;
-		this.splitPacketId = 0;
-		this.splitPacketIndex = 0;
+    /**
+     * Attempts to read the encapsulated from a datagram's raw data buffer.
+     *
+     * @param buffer The data buffer to read from
+     * @return Whether or not the encapsulated packet was read successfully
+     */
+    public boolean readFromBuffer( PacketBuffer buffer ) {
+        if ( buffer.getRemaining() < 3 ) {
+            return false;
+        }
 
-		// For the reasoning why the second check is commented out, please see the implementation of
-		// ServerSocket#createObjectPools()
-		if ( reliability == null /* || packetLength >= MAXIMUM_MTU_SIZE */ ) {
-			// Datagram is malformed --> Discard
-			return false;
-		}
+        // Decode the packet:
+        byte flags = buffer.readByte();
+        this.reliability = PacketReliability.getFromId( (byte) ( ( flags & 0xE0 ) >>> 5 ) );
+        boolean isSplitPacket = ( flags & 0x10 ) != 0;
+        int packetLength = ( buffer.readUShort() + 7 ) >> 3;
+        this.reliableMessageNumber = -1;
+        this.sequencingIndex = -1;
+        this.orderingIndex = -1;
+        this.orderingChannel = 0;
+        this.splitPacketCount = 0;
+        this.splitPacketId = 0;
+        this.splitPacketIndex = 0;
 
-		if ( reliability == PacketReliability.RELIABLE ||
-		     reliability == PacketReliability.RELIABLE_SEQUENCED ||
-		     reliability == PacketReliability.RELIABLE_ORDERED ) {
-			reliableMessageNumber = buffer.readTriad();
-		}
+        // For the reasoning why the second check is commented out, please see the implementation of
+        // ServerSocket#createObjectPools()
+        if ( reliability == null /* || packetLength >= MAXIMUM_MTU_SIZE */ ) {
+            // Datagram is malformed --> Discard
+            return false;
+        }
 
-		if ( reliability == PacketReliability.UNRELIABLE_SEQUENCED || reliability == PacketReliability.RELIABLE_SEQUENCED ) {
-			sequencingIndex = buffer.readTriad();
-		}
+        if ( reliability == PacketReliability.RELIABLE ||
+                reliability == PacketReliability.RELIABLE_SEQUENCED ||
+                reliability == PacketReliability.RELIABLE_ORDERED ) {
+            reliableMessageNumber = buffer.readTriad();
+        }
 
-		if ( reliability == PacketReliability.UNRELIABLE_SEQUENCED ||
-		     reliability == PacketReliability.RELIABLE_SEQUENCED ||
-		     reliability == PacketReliability.RELIABLE_ORDERED ||
-		     reliability == PacketReliability.RELIABLE_ORDERED_WITH_ACK_RECEIPT ) {
-			orderingIndex = buffer.readTriad();
-			orderingChannel = buffer.readByte();
-		}
+        if ( reliability == PacketReliability.UNRELIABLE_SEQUENCED || reliability == PacketReliability.RELIABLE_SEQUENCED ) {
+            sequencingIndex = buffer.readTriad();
+        }
 
-		if ( isSplitPacket ) {
-			splitPacketCount = buffer.readUInt();
-			splitPacketId = buffer.readUShort();
-			splitPacketIndex = buffer.readUInt();
-		}
+        if ( reliability == PacketReliability.UNRELIABLE_SEQUENCED ||
+                reliability == PacketReliability.RELIABLE_SEQUENCED ||
+                reliability == PacketReliability.RELIABLE_ORDERED ||
+                reliability == PacketReliability.RELIABLE_ORDERED_WITH_ACK_RECEIPT ) {
+            orderingIndex = buffer.readTriad();
+            orderingChannel = buffer.readByte();
+        }
 
-		// Sanity check for odd circumstances:
-		if ( packetLength <= 0 || orderingChannel < 0 || orderingChannel >= NUM_ORDERING_CHANNELS || ( isSplitPacket && splitPacketIndex >= splitPacketCount ) ) {
-			// Datagram is malformed --> Discard
-			return false;
-		}
+        if ( isSplitPacket ) {
+            splitPacketCount = buffer.readUInt();
+            splitPacketId = buffer.readUShort();
+            splitPacketIndex = buffer.readUInt();
+        }
 
-		// This is a nasty hack to get around https://bugs.mojang.com/browse/MCPE-16450
-		// TODO: Remove this when issue got resolved
-		if ( buffer.getBuffer()[buffer.getPosition()] == (byte) 0xFE && buffer.getBuffer()[buffer.getPosition() + 1] == (byte) 0x06 ) {
-			// This is a MCPE batched packet. Look ahead for the compressed size and check if it overflows Raknets bit length short
-			int compressedLength = ( ( buffer.getBuffer()[buffer.getPosition() + 2] & 0xFF ) << 24 |
-					( buffer.getBuffer()[buffer.getPosition() + 3] & 0xFF ) << 16 |
-					( buffer.getBuffer()[buffer.getPosition() + 4] & 0xFF ) << 8 |
-					( buffer.getBuffer()[buffer.getPosition() + 5] & 0xFF ) );
-			if ( compressedLength > 8192 ) {
-					packetLength <<= 16;
-			}
-		}
+        // Sanity check for odd circumstances:
+        if ( packetLength <= 0 || orderingChannel < 0 || orderingChannel >= NUM_ORDERING_CHANNELS || ( isSplitPacket && splitPacketIndex >= splitPacketCount ) ) {
+            // Datagram is malformed --> Discard
+            return false;
+        }
 
-		this.packetData = new byte[packetLength];
-		buffer.readBytes( packetData );
+        // This is a nasty hack to get around https://bugs.mojang.com/browse/MCPE-16450
+        // TODO: Remove this when issue got resolved
+        int currentPosition = buffer.getPosition();
+        if ( this.reliability == PacketReliability.RELIABLE && buffer.readByte() == (byte) 0xFE && buffer.readByte() == (byte) 0x06 ) {
+            // This is a MCPE batched packet. Look ahead for the compressed size and check if it overflows Raknets bit length short
+            int compressedLength = buffer.readInt();
+            int newPacketSize = compressedLength + ( buffer.getPosition() - currentPosition );
+            if ( newPacketSize > 0 && newPacketSize <= buffer.getRemaining() ) {
+                packetLength = newPacketSize;
+            }
+        }
+        buffer.setPosition( currentPosition );
 
+        this.packetData = new byte[packetLength];
+        buffer.readBytes( packetData );
 
+        return true;
+    }
 
-		return true;
-	}
+    private String toHexString( byte[] data ) {
+        StringBuilder stringBuilder = new StringBuilder();
 
-	/**
-	 * Writes the encapsulated packet to the specified packet buffer.
-	 *
-	 * @param buffer The packet buffer to write the encapuslated packet to
-	 */
-	public void writeToBuffer( PacketBuffer buffer ) {
-		byte flags = (byte) ( this.reliability.getId() << 5 );
-		if ( this.isSplitPacket() ) {
-			flags |= 0x10;
-		}
+        for ( byte b : data ) {
+            stringBuilder.append( "0x" ).append( Integer.toHexString( b & 0xFF ) ).append( " " );
+        }
 
-		buffer.writeByte( flags );
-		buffer.writeUShort( this.getPacketLength() << 3 );
+        return stringBuilder.toString();
+    }
 
-		if ( reliability == PacketReliability.RELIABLE ||
-		     reliability == PacketReliability.RELIABLE_SEQUENCED ||
-		     reliability == PacketReliability.RELIABLE_ORDERED ) {
-			buffer.writeTriad( this.reliableMessageNumber );
-		}
+    /**
+     * Writes the encapsulated packet to the specified packet buffer.
+     *
+     * @param buffer The packet buffer to write the encapuslated packet to
+     */
+    public void writeToBuffer( PacketBuffer buffer ) {
+        byte flags = (byte) ( this.reliability.getId() << 5 );
+        if ( this.isSplitPacket() ) {
+            flags |= 0x10;
+        }
 
-		if ( reliability == PacketReliability.UNRELIABLE_SEQUENCED || reliability == PacketReliability.RELIABLE_SEQUENCED ) {
-			buffer.writeTriad( this.sequencingIndex );
-		}
+        buffer.writeByte( flags );
+        buffer.writeUShort( this.getPacketLength() << 3 );
 
-		if ( reliability == PacketReliability.UNRELIABLE_SEQUENCED ||
-		     reliability == PacketReliability.RELIABLE_SEQUENCED ||
-		     reliability == PacketReliability.RELIABLE_ORDERED ||
-		     reliability == PacketReliability.RELIABLE_ORDERED_WITH_ACK_RECEIPT ) {
-			buffer.writeTriad( this.orderingIndex );
-			buffer.writeByte( this.orderingChannel );
-		}
+        if ( reliability == PacketReliability.RELIABLE ||
+                reliability == PacketReliability.RELIABLE_SEQUENCED ||
+                reliability == PacketReliability.RELIABLE_ORDERED ) {
+            buffer.writeTriad( this.reliableMessageNumber );
+        }
 
-		if ( this.isSplitPacket() ) {
-			buffer.writeUInt( this.splitPacketCount );
-			buffer.writeUShort( this.splitPacketId );
-			buffer.writeUInt( this.splitPacketIndex );
-		}
+        if ( reliability == PacketReliability.UNRELIABLE_SEQUENCED || reliability == PacketReliability.RELIABLE_SEQUENCED ) {
+            buffer.writeTriad( this.sequencingIndex );
+        }
 
-		buffer.writeBytes( this.packetData );
-	}
+        if ( reliability == PacketReliability.UNRELIABLE_SEQUENCED ||
+                reliability == PacketReliability.RELIABLE_SEQUENCED ||
+                reliability == PacketReliability.RELIABLE_ORDERED ||
+                reliability == PacketReliability.RELIABLE_ORDERED_WITH_ACK_RECEIPT ) {
+            buffer.writeTriad( this.orderingIndex );
+            buffer.writeByte( this.orderingChannel );
+        }
 
-	public int getHeaderLength() {
-		int length = 3;
+        if ( this.isSplitPacket() ) {
+            buffer.writeUInt( this.splitPacketCount );
+            buffer.writeUShort( this.splitPacketId );
+            buffer.writeUInt( this.splitPacketIndex );
+        }
 
-		if ( reliability == PacketReliability.RELIABLE ||
-		     reliability == PacketReliability.RELIABLE_SEQUENCED ||
-		     reliability == PacketReliability.RELIABLE_ORDERED ) {
-			length += 3;
-		}
+        buffer.writeBytes( this.packetData );
+    }
 
-		if ( reliability == PacketReliability.UNRELIABLE_SEQUENCED || reliability == PacketReliability.RELIABLE_SEQUENCED ) {
-			length += 3;
-		}
+    public int getHeaderLength() {
+        int length = 3;
 
-		if ( reliability == PacketReliability.UNRELIABLE_SEQUENCED ||
-		     reliability == PacketReliability.RELIABLE_SEQUENCED ||
-		     reliability == PacketReliability.RELIABLE_ORDERED ||
-		     reliability == PacketReliability.RELIABLE_ORDERED_WITH_ACK_RECEIPT ) {
-			length += 4;
-		}
+        if ( reliability == PacketReliability.RELIABLE ||
+                reliability == PacketReliability.RELIABLE_SEQUENCED ||
+                reliability == PacketReliability.RELIABLE_ORDERED ) {
+            length += 3;
+        }
 
-		if ( this.isSplitPacket() ) {
-			length += 10;
-		}
+        if ( reliability == PacketReliability.UNRELIABLE_SEQUENCED || reliability == PacketReliability.RELIABLE_SEQUENCED ) {
+            length += 3;
+        }
 
-		return length;
-	}
+        if ( reliability == PacketReliability.UNRELIABLE_SEQUENCED ||
+                reliability == PacketReliability.RELIABLE_SEQUENCED ||
+                reliability == PacketReliability.RELIABLE_ORDERED ||
+                reliability == PacketReliability.RELIABLE_ORDERED_WITH_ACK_RECEIPT ) {
+            length += 4;
+        }
 
-	public PacketReliability getReliability() {
-		return reliability;
-	}
+        if ( this.isSplitPacket() ) {
+            length += 10;
+        }
 
-	void setReliability( PacketReliability reliability ) {
-		this.reliability = reliability;
-	}
+        return length;
+    }
 
-	public boolean isSplitPacket() {
-		return this.splitPacketCount > 0;
-	}
+    public PacketReliability getReliability() {
+        return reliability;
+    }
 
-	public int getPacketLength() {
-		return this.packetData.length;
-	}
+    void setReliability( PacketReliability reliability ) {
+        this.reliability = reliability;
+    }
 
-	public int getReliableMessageNumber() {
-		return reliableMessageNumber;
-	}
+    public boolean isSplitPacket() {
+        return this.splitPacketCount > 0;
+    }
 
-	void setReliableMessageNumber( int reliableMessageNumber ) {
-		this.reliableMessageNumber = reliableMessageNumber;
-	}
+    public int getPacketLength() {
+        return this.packetData.length;
+    }
 
-	public int getSequencingIndex() {
-		return sequencingIndex;
-	}
+    public int getReliableMessageNumber() {
+        return reliableMessageNumber;
+    }
 
-	void setSequencingIndex( int sequencingIndex ) {
-		this.sequencingIndex = sequencingIndex;
-	}
+    void setReliableMessageNumber( int reliableMessageNumber ) {
+        this.reliableMessageNumber = reliableMessageNumber;
+    }
 
-	public int getOrderingIndex() {
-		return orderingIndex;
-	}
+    public int getSequencingIndex() {
+        return sequencingIndex;
+    }
 
-	void setOrderingIndex( int orderingIndex ) {
-		this.orderingIndex = orderingIndex;
-	}
+    void setSequencingIndex( int sequencingIndex ) {
+        this.sequencingIndex = sequencingIndex;
+    }
 
-	public byte getOrderingChannel() {
-		return orderingChannel;
-	}
+    public int getOrderingIndex() {
+        return orderingIndex;
+    }
 
-	void setOrderingChannel( byte orderingChannel ) {
-		this.orderingChannel = orderingChannel;
-	}
+    void setOrderingIndex( int orderingIndex ) {
+        this.orderingIndex = orderingIndex;
+    }
 
-	public long getSplitPacketCount() {
-		return splitPacketCount;
-	}
+    public byte getOrderingChannel() {
+        return orderingChannel;
+    }
 
-	void setSplitPacketCount( long splitPacketCount ) {
-		this.splitPacketCount = splitPacketCount;
-	}
+    void setOrderingChannel( byte orderingChannel ) {
+        this.orderingChannel = orderingChannel;
+    }
 
-	public int getSplitPacketId() {
-		return splitPacketId;
-	}
+    public long getSplitPacketCount() {
+        return splitPacketCount;
+    }
 
-	void setSplitPacketId( int splitPacketId ) {
-		this.splitPacketId = splitPacketId;
-	}
+    void setSplitPacketCount( long splitPacketCount ) {
+        this.splitPacketCount = splitPacketCount;
+    }
 
-	public long getSplitPacketIndex() {
-		return splitPacketIndex;
-	}
+    public int getSplitPacketId() {
+        return splitPacketId;
+    }
 
-	void setSplitPacketIndex( long splitPacketIndex ) {
-		this.splitPacketIndex = splitPacketIndex;
-	}
+    void setSplitPacketId( int splitPacketId ) {
+        this.splitPacketId = splitPacketId;
+    }
 
-	public byte[] getPacketData() {
-		return packetData;
-	}
+    public long getSplitPacketIndex() {
+        return splitPacketIndex;
+    }
 
-	public void setPacketData( byte[] packetData ) {
-		this.packetData = packetData;
-	}
+    void setSplitPacketIndex( long splitPacketIndex ) {
+        this.splitPacketIndex = splitPacketIndex;
+    }
 
-	public long getWeight() {
-		return this.weight;
-	}
+    public byte[] getPacketData() {
+        return packetData;
+    }
 
-	public void setWeight( long weight ) {
-		this.weight = weight;
-	}
+    public void setPacketData( byte[] packetData ) {
+        this.packetData = packetData;
+    }
 
-	public long getNextExecution() {
-		return nextExecution;
-	}
+    public long getWeight() {
+        return this.weight;
+    }
 
-	public void setNextExecution( long nextExecution ) {
-		this.nextExecution = nextExecution;
-	}
+    public void setWeight( long weight ) {
+        this.weight = weight;
+    }
 
-	public void incrementSendCount() {
-		this.resendCount++;
-	}
+    public long getNextExecution() {
+        return nextExecution;
+    }
+
+    public void setNextExecution( long nextExecution ) {
+        this.nextExecution = nextExecution;
+    }
+
+    public void incrementSendCount() {
+        this.resendCount++;
+    }
 
 }

@@ -355,4 +355,13 @@ public class PacketBuffer {
 		return count;
 	}
 
+	/**
+	 * Set the pointer of this buffer to the specified position
+	 *
+	 * @param position The position at which the pointer should be
+	 */
+	public void setPosition( int position ) {
+		this.position = position;
+	}
+
 }

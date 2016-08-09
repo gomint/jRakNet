@@ -1142,16 +1142,6 @@ public abstract class Connection {
         }
     }
 
-    private String toHexString( byte[] data ) {
-        StringBuilder stringBuilder = new StringBuilder();
-
-        for ( byte b : data ) {
-            stringBuilder.append( "0x" ).append( Integer.toHexString( b & 0xFF ) ).append( " " );
-        }
-
-        return stringBuilder.toString();
-    }
-
     private void pushReceivedPacket( EncapsulatedPacket packet ) {
         if ( packet.getPacketLength() <= 0 ) {
             return;
