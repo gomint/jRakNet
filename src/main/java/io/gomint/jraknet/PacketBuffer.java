@@ -229,6 +229,12 @@ public class PacketBuffer {
 		this.buffer[this.position++] = (byte) ( v & 0xFF );
 	}
 
+	public void writeLShort( short v ) {
+		this.ensureCapacity( 2 );
+		this.buffer[this.position++] = (byte) ( v & 0xFF );
+		this.buffer[this.position++] = (byte) ( ( v >> 8 ) & 0xFF );
+	}
+
 	public void writeUInt( long v ) {
 		this.ensureCapacity( 4 );
 		this.buffer[this.position++] = (byte) ( ( v >> 24 ) & 0xFF );
