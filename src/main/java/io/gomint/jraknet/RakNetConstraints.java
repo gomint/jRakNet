@@ -21,7 +21,7 @@ public class RakNetConstraints {
 	public static final int MAXIMUM_MTU_SIZE = 1492;
 
 	// The size of any UDP datagram's header
-	public static final int UDP_DATAGRAM_HEADER_SIZE = 28;
+	public static final int UDP_DATAGRAM_HEADER_SIZE = 18;
 
 	// Byte Signature used to identify unconnected data packets for yet unconnected connections (may be seen here: https://github.com/OculusVR/RakNet/blob/master/Source/RakPeer.cpp#L135)
 	public static final byte[] OFFLINE_MESSAGE_DATA_ID = new byte[] { (byte) 0x00, (byte) 0xFF, (byte) 0xFF, (byte) 0x00, (byte) 0xFE, (byte) 0xFE, (byte) 0xFE, (byte) 0xFE, (byte) 0xFD, (byte) 0xFD, (byte) 0xFD, (byte) 0xFD, (byte) 0x12, (byte) 0x34, (byte) 0x56, (byte) 0x78 };
@@ -103,10 +103,10 @@ public class RakNetConstraints {
 	// =========================== MOJANG STUFF =========================== //
 
 	// Version of Pocket Edition's protocol (needs to be figured out by testing different values inside ping)
-	public static final int MINECRAFT_PE_PROTOCOL_VERSION = 81;
+	public static final int MINECRAFT_PE_PROTOCOL_VERSION = 102;
 
 	// Version of the Pocket Edition server (may be found in main menu)
-	public static final String MINECRAFT_PE_NETWORK_VERSION = "0.15.2";
+	public static final String MINECRAFT_PE_NETWORK_VERSION = "1.0.4";
 
 	// Format for all MOTD messages:
 	//  - 0: String with actual MOTD

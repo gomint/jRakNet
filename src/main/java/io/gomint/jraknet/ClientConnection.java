@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 
 import java.io.IOException;
 import java.net.DatagramPacket;
+import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 
 import static io.gomint.jraknet.RakNetConstraints.*;
@@ -21,7 +22,7 @@ class ClientConnection extends Connection {
 	private int connectionAttempts;
 	private long lastConnectionAttempt;
 
-	public ClientConnection( ClientSocket client, SocketAddress address, ConnectionState initialState ) {
+	public ClientConnection( ClientSocket client, InetSocketAddress address, ConnectionState initialState ) {
 		super( address, initialState );
 		this.client = client;
 		this.connectionAttempts = 0;
@@ -31,7 +32,7 @@ class ClientConnection extends Connection {
 	// ================================ CONNECTION ================================ //
 
 	@Override
-	protected void sendRaw( SocketAddress recipient, PacketBuffer buffer ) throws IOException {
+	protected void sendRaw( InetSocketAddress recipient, PacketBuffer buffer ) throws IOException {
 		this.client.send( recipient, buffer );
 	}
 
@@ -66,26 +67,26 @@ class ClientConnection extends Connection {
 	}
 
 	@Override
-	protected boolean handleDatagram0( DatagramPacket datagram, long time ) {
+	protected boolean handleDatagram0( InetSocketAddress sender, PacketBuffer datagram, long time ) {
 		this.lastPingTime = time;
 
 		// Handle special internal packets:
-		byte packetId = datagram.getData()[0];
+		byte packetId = datagram.getBuffer()[0];
 		switch ( packetId ) {
 			case OPEN_CONNECTION_REPLY_1:
-				this.handlePreConnectionReply1( datagram );
+				this.handlePreConnectionReply1( sender, datagram );
 				return true;
 			case OPEN_CONNECTION_REPLY_2:
-				this.handlePreConnectionReply2( datagram );
+				this.handlePreConnectionReply2( sender, datagram );
 				return true;
 			case ALREADY_CONNECTED:
-				this.handleAlreadyConnected( datagram );
+				this.handleAlreadyConnected( sender, datagram );
 				return true;
 			case NO_FREE_INCOMING_CONNECTIONS:
-				this.handleNoFreeIncomingConnections( datagram );
+				this.handleNoFreeIncomingConnections( sender, datagram );
 				return true;
 			case CONNECTION_REQUEST_FAILED:
-				this.handleConnectionRequestFailed( datagram );
+				this.handleConnectionRequestFailed( sender, datagram );
 				return true;
 		}
 		return false;
@@ -124,16 +125,15 @@ class ClientConnection extends Connection {
 
 	// ================================ PACKET HANDLERS ================================ //
 
-	private void handlePreConnectionReply1( DatagramPacket datagram ) {
+	private void handlePreConnectionReply1( InetSocketAddress sender, PacketBuffer datagram ) {
 		// Prevent further connection attempts:
 		this.connectionAttempts = 11;
 
-		PacketBuffer buffer = new PacketBuffer( datagram.getData(), 0 );
-		buffer.skip( 1 );                                       // Packet ID
-		buffer.readOfflineMessageDataId();                      // Offline Message Data ID
-		this.setGuid( buffer.readLong() );                      // Server GUID
-		boolean securityEnabled = buffer.readBoolean();         // Security Enabled
-		this.setMtuSize( buffer.readUShort() );                 // MTU Size
+		datagram.skip( 1 );                                       // Packet ID
+		datagram.readOfflineMessageDataId();                      // Offline Message Data ID
+		this.setGuid( datagram.readLong() );                      // Server GUID
+		boolean securityEnabled = datagram.readBoolean();         // Security Enabled
+		this.setMtuSize( datagram.readUShort() );                 // MTU Size
 
 		if ( securityEnabled ) {
 			// We don't support security:
@@ -142,24 +142,24 @@ class ClientConnection extends Connection {
 			return;
 		}
 
-		this.sendPreConnectionRequest2( datagram.getSocketAddress() );
+		this.sendPreConnectionRequest2( sender );
 	}
 
-	private void handlePreConnectionReply2( DatagramPacket datagram ) {
+	private void handlePreConnectionReply2( InetSocketAddress sender, PacketBuffer datagram ) {
 		if ( this.getState() != ConnectionState.INITIALIZING ) {
 			return;
 		}
 
-		PacketBuffer buffer = new PacketBuffer( datagram.getData(), 0 );
-		buffer.skip( 1 );                                                                       // Packet ID
-		buffer.readOfflineMessageDataId();                                                      // Offline Message Data ID
-		if ( this.getGuid() != buffer.readLong() ) {                                            // Server GUID
+		datagram.skip( 1 );                                                                       // Packet ID
+		datagram.readOfflineMessageDataId();                                                      // Offline Message Data ID
+		if ( this.getGuid() != datagram.readLong() ) {                                            // Server GUID
 			this.setState( ConnectionState.UNCONNECTED );
 			this.propagateConnectionAttemptFailed( "Server send different GUIDs during pre-connect" );
 			return;
 		}
-		this.setMtuSize( buffer.readUShort() );                                                 // MTU Size
-		@SuppressWarnings( "unused" ) boolean securityEnabled = buffer.readBoolean();           // Security Enabled
+
+		this.setMtuSize( datagram.readUShort() );                                                 // MTU Size
+		@SuppressWarnings( "unused" ) boolean securityEnabled = datagram.readBoolean();           // Security Enabled
 
 		/* if ( securityEnabled ) {
 			// We don't support security:
@@ -174,20 +174,23 @@ class ClientConnection extends Connection {
 		this.initializeStructures();
 		this.setState( ConnectionState.RELIABLE );
 
-		this.sendConnectionRequest( datagram.getSocketAddress() );
+		this.sendConnectionRequest( sender );
 	}
 
-	private void handleAlreadyConnected( @SuppressWarnings( "unused" ) DatagramPacket datagram ) {
+	@SuppressWarnings( "unused" )
+	private void handleAlreadyConnected( InetSocketAddress sender, PacketBuffer datagram ) {
 		this.setState( ConnectionState.UNCONNECTED );
 		this.propagateConnectionAttemptFailed( "System is already connected" );
 	}
 
-	private void handleNoFreeIncomingConnections( @SuppressWarnings( "unused" ) DatagramPacket datagram ) {
+	@SuppressWarnings( "unused" )
+	private void handleNoFreeIncomingConnections( InetSocketAddress sender, PacketBuffer datagram ) {
 		this.setState( ConnectionState.UNCONNECTED );
 		this.propagateConnectionAttemptFailed( "Remote peer has no free incoming connections left" );
 	}
 
-	private void handleConnectionRequestFailed( @SuppressWarnings( "unused" ) DatagramPacket datagram ) {
+	@SuppressWarnings( "unused" )
+	private void handleConnectionRequestFailed( InetSocketAddress sender, PacketBuffer datagram ) {
 		this.setState( ConnectionState.UNCONNECTED );
 		this.propagateConnectionAttemptFailed( "Remote peer rejected connection request" );
 	}
@@ -214,7 +217,7 @@ class ClientConnection extends Connection {
 
 	// ================================ PACKET SENDERS ================================ //
 
-	private void sendPreConnectionRequest1( SocketAddress recipient, int mtuSize ) {
+	private void sendPreConnectionRequest1( InetSocketAddress recipient, int mtuSize ) {
 		this.setState( ConnectionState.INITIALIZING );
 
 		PacketBuffer buffer = new PacketBuffer( MAXIMUM_MTU_SIZE );
@@ -232,7 +235,7 @@ class ClientConnection extends Connection {
 		}
 	}
 
-	private void sendPreConnectionRequest2( SocketAddress recipient ) {
+	private void sendPreConnectionRequest2( InetSocketAddress recipient ) {
 		PacketBuffer buffer = new PacketBuffer( 34 );
 		buffer.writeByte( OPEN_CONNECTION_REQUEST_2 );          // Packet ID
 		buffer.writeOfflineMessageDataId();                     // Offline Message Data ID
@@ -247,7 +250,7 @@ class ClientConnection extends Connection {
 		}
 	}
 
-	private void sendConnectionRequest( @SuppressWarnings( "unused" ) SocketAddress recipient ) {
+	private void sendConnectionRequest( @SuppressWarnings( "unused" ) InetSocketAddress recipient ) {
 		PacketBuffer buffer = new PacketBuffer( 18 );
 		buffer.writeByte( CONNECTION_REQUEST );                 // Packet ID
 		buffer.writeLong( this.client.getGuid() );              // Client GUID

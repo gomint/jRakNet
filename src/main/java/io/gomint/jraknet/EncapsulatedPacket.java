@@ -61,8 +61,9 @@ public class EncapsulatedPacket {
         // Decode the packet:
         byte flags = buffer.readByte();
         this.reliability = PacketReliability.getFromId( (byte) ( ( flags & 0xE0 ) >>> 5 ) );
-        boolean isSplitPacket = ( flags & 0x10 ) != 0;
-        int packetLength = ( buffer.readUShort() + 7 ) >> 3;
+        boolean isSplitPacket = ( flags & 0b00010000 ) > 0;
+        int packetLength = (int) Math.ceil( buffer.readUShort() / 8 );
+
         this.reliableMessageNumber = -1;
         this.sequencingIndex = -1;
         this.orderingIndex = -1;
@@ -80,7 +81,8 @@ public class EncapsulatedPacket {
 
         if ( reliability == PacketReliability.RELIABLE ||
                 reliability == PacketReliability.RELIABLE_SEQUENCED ||
-                reliability == PacketReliability.RELIABLE_ORDERED ) {
+                reliability == PacketReliability.RELIABLE_ORDERED ||
+                reliability == PacketReliability.RELIABLE_ORDERED_WITH_ACK_RECEIPT ) {
             reliableMessageNumber = buffer.readTriad();
         }
 
@@ -90,8 +92,7 @@ public class EncapsulatedPacket {
 
         if ( reliability == PacketReliability.UNRELIABLE_SEQUENCED ||
                 reliability == PacketReliability.RELIABLE_SEQUENCED ||
-                reliability == PacketReliability.RELIABLE_ORDERED ||
-                reliability == PacketReliability.RELIABLE_ORDERED_WITH_ACK_RECEIPT ) {
+                reliability == PacketReliability.RELIABLE_ORDERED ) {
             orderingIndex = buffer.readTriad();
             orderingChannel = buffer.readByte();
         }
@@ -108,35 +109,10 @@ public class EncapsulatedPacket {
             return false;
         }
 
-        // This is a nasty hack to get around https://bugs.mojang.com/browse/MCPE-16450
-        // TODO: Remove this when issue got resolved
-        int currentPosition = buffer.getPosition();
-        if ( buffer.readByte() == (byte) 0xFE ) {
-            // Look ahead if we are the last packet in the line
-            if ( packetLength - 1 < buffer.getRemaining() ) {
-                // Check if we can hit the end with a simple overflow
-                int tempPacketLength = packetLength + 8192;
-                if ( tempPacketLength - 1 == buffer.getRemaining() ) {
-                    packetLength = tempPacketLength;
-                }
-            }
-        }
-        buffer.setPosition( currentPosition );
-
         this.packetData = new byte[packetLength];
         buffer.readBytes( packetData );
 
         return true;
-    }
-
-    private String toHexString( byte[] data ) {
-        StringBuilder stringBuilder = new StringBuilder();
-
-        for ( byte b : data ) {
-            stringBuilder.append( "0x" ).append( Integer.toHexString( b & 0xFF ) ).append( " " );
-        }
-
-        return stringBuilder.toString();
     }
 
     /**

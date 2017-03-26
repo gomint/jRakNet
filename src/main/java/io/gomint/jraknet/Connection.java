@@ -1,18 +1,14 @@
 package io.gomint.jraknet;
 
 import io.gomint.jraknet.datastructures.*;
+import io.netty.buffer.ByteBuf;
+import io.netty.channel.Channel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.net.DatagramPacket;
 import java.net.InetSocketAddress;
-import java.net.SocketAddress;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -24,16 +20,17 @@ import static io.gomint.jraknet.RakNetConstraints.*;
 
 /**
  * @author BlackyPaw
- * @version 1.0
+ * @author geNAZt
+ * @version 2.0
  */
 public abstract class Connection {
 
-    private static final Logger logger = LoggerFactory.getLogger( Connection.class );
+    private static final Logger LOGGER = LoggerFactory.getLogger( Connection.class );
     public static final int DEFAULT_RESEND_TIMEOUT = 500;
     protected static final InetSocketAddress[] LOCAL_IP_ADDRESSES = new InetSocketAddress[]{ new InetSocketAddress( "127.0.0.1", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ) };
 
     // Connection Metadata
-    private final SocketAddress address;
+    private final InetSocketAddress address;
     private ConnectionState state;
 
     private boolean hasGuid;
@@ -85,7 +82,7 @@ public abstract class Connection {
 
     // ================================ CONSTRUCTORS ================================ //
 
-    Connection( SocketAddress address, ConnectionState initialState ) {
+    Connection( InetSocketAddress address, ConnectionState initialState ) {
         this.address = address;
         this.state = initialState;
         this.reset();
@@ -108,7 +105,7 @@ public abstract class Connection {
      *
      * @return The address of the connection's remote peer
      */
-    public SocketAddress getAddress() {
+    public InetSocketAddress getAddress() {
         return this.address;
     }
 
@@ -393,7 +390,7 @@ public abstract class Connection {
      * @param buffer    The buffer containing the data to be sent
      * @throws IOException Thrown in case the data could not be sent for some reason
      */
-    protected abstract void sendRaw( SocketAddress recipient, PacketBuffer buffer ) throws IOException;
+    protected abstract void sendRaw( InetSocketAddress recipient, PacketBuffer buffer ) throws IOException;
 
     /**
      * Gets a logger to be used for logging errors and warnings.
@@ -427,11 +424,12 @@ public abstract class Connection {
     /**
      * Implementation hook.
      *
+     * @param sender   The channel which sent this datagram
      * @param datagram The datagram to be handled
      * @param time     The current system time
      * @return Whether or not the datagram was handled already and should be processed no further
      */
-    protected abstract boolean handleDatagram0( DatagramPacket datagram, long time );
+    protected abstract boolean handleDatagram0( InetSocketAddress sender, PacketBuffer datagram, long time );
 
     /**
      * Implementation hook.
@@ -488,7 +486,7 @@ public abstract class Connection {
 
 
     protected final void setMtuSize( int mtuSize ) {
-        this.mtuSize = mtuSize;
+        this.mtuSize = Math.min( mtuSize, 1464 );
     }
 
     protected final void setGuid( long guid ) {
@@ -715,10 +713,12 @@ public abstract class Connection {
         this.postUpdate( time );
 
         if ( this.state == ConnectionState.DISCONNECTING ) {
-            // Check if we can perform a clean disconnect now:
-            this.state = ConnectionState.UNCONNECTED;
-            this.propagateConnectionDisconnected();
-            return false;
+            if ( this.sendBuffer.size() == 0 ) {
+                // Check if we can perform a clean disconnect now:
+                this.state = ConnectionState.UNCONNECTED;
+                this.propagateConnectionDisconnected();
+                return false;
+            }
         }
 
         return true;
@@ -756,13 +756,14 @@ public abstract class Connection {
      * Invoked by the receive thread whenever a datagram from this connection's remote peer
      * was received.
      *
+     * @param sender   The channel which sent this datagram
      * @param datagram The datagram that was received
      */
-    void handleDatagram( DatagramPacket datagram, long time ) {
+    void handleDatagram( InetSocketAddress sender, PacketBuffer datagram, long time ) {
         this.lastReceivedPacket = time;
 
-        if ( !this.handleDatagram0( datagram, time ) ) {
-            this.handleConnectedDatagram( datagram );
+        if ( !this.handleDatagram0( sender, datagram, time ) ) {
+            this.handleConnectedDatagram( sender, datagram );
         }
     }
 
@@ -929,14 +930,13 @@ public abstract class Connection {
 
     // ================================ PACKET HANDLERS ================================ //
 
-    private void handleConnectedDatagram( DatagramPacket datagram ) {
+    private void handleConnectedDatagram( InetSocketAddress sender, PacketBuffer buffer ) {
         if ( !this.state.isReliable() ) {
             // This connection is not reliable --> internal structures might not have been initialized
             return;
         }
 
         // Deserialize datagram header:
-        PacketBuffer buffer = new PacketBuffer( datagram.getData(), 0 );
         byte flags = buffer.readByte();
         boolean isValid = ( flags & 0x80 ) != 0;
         if ( !isValid ) {
@@ -1007,7 +1007,7 @@ public abstract class Connection {
         }
 
         EncapsulatedPacket packet = new EncapsulatedPacket();
-        while ( buffer.getPosition() - buffer.getBufferOffset() < datagram.getLength() && packet.readFromBuffer( buffer ) ) {
+        while ( buffer.getRemaining() > 0 && packet.readFromBuffer( buffer ) ) {
             PacketReliability reliability = packet.getReliability();
             int orderingIndex = packet.getOrderingIndex();
             byte orderingChannel = packet.getOrderingChannel();

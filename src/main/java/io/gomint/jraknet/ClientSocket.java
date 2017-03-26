@@ -1,16 +1,22 @@
 package io.gomint.jraknet;
 
+import io.netty.bootstrap.Bootstrap;
+import io.netty.buffer.Unpooled;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.epoll.Epoll;
+import io.netty.channel.epoll.EpollDatagramChannel;
+import io.netty.channel.epoll.EpollEventLoopGroup;
+import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.DatagramPacket;
+import io.netty.channel.socket.nio.NioDatagramChannel;
+import io.netty.util.internal.ThreadLocalRandom;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.net.DatagramPacket;
-import java.net.DatagramSocket;
 import java.net.InetSocketAddress;
-import java.net.SocketAddress;
 import java.net.SocketException;
-import java.nio.ByteBuffer;
-import java.nio.channels.DatagramChannel;
 import java.nio.charset.StandardCharsets;
 
 import static io.gomint.jraknet.RakNetConstraints.*;
@@ -59,16 +65,29 @@ public class ClientSocket extends Socket {
             throw new IllegalStateException( "Cannot re-initialized ClientSocket" );
         }
 
-        try {
-            this.channel = DatagramChannel.open();
-            this.channel.configureBlocking( false );
-            this.udpSocket = this.channel.socket();
+        this.udpSocket = new Bootstrap();
+        this.udpSocket.group( Epoll.isAvailable() ? new EpollEventLoopGroup() : new NioEventLoopGroup() );
+        this.udpSocket.channel( Epoll.isAvailable() ? EpollDatagramChannel.class : NioDatagramChannel.class );
+        this.udpSocket.handler( new ChannelInboundHandlerAdapter() {
+            @Override
+            public void channelRead( ChannelHandlerContext ctx, Object msg ) throws Exception {
+                io.netty.channel.socket.DatagramPacket packet = (io.netty.channel.socket.DatagramPacket) msg;
+                PacketBuffer content = new PacketBuffer( packet.content() );
+                InetSocketAddress sender = packet.sender();
 
-            // Buffers ?!
-            this.udpSocket.setReceiveBufferSize( 1024 * 1024 * 8 );
-            this.udpSocket.setSendBufferSize( 1024 * 1024 * 8 );
-        } catch ( IOException e ) {
-            throw new SocketException( e.getMessage() );
+                if ( !receiveDatagram( sender, content ) ) {
+                    // Push datagram to update queue:
+                    handleDatagram( sender, content, System.currentTimeMillis() );
+                }
+            }
+        } );
+
+        try {
+            this.channel = this.udpSocket.bind( ThreadLocalRandom.current().nextInt( 45000, 65000 ) ).sync().channel();
+        } catch ( InterruptedException e ) {
+            SocketException exception = new SocketException( "Could not bind to socket" );
+            exception.initCause( e );
+            throw exception;
         }
 
         this.afterInitialize();
@@ -173,11 +192,11 @@ public class ClientSocket extends Socket {
      * @return Whether or not the datagram was handled by this method already and should be processed no further
      */
     @Override
-    protected boolean receiveDatagram( DatagramPacket datagram ) {
+    protected boolean receiveDatagram( InetSocketAddress sender, PacketBuffer datagram ) {
         // Check if this might be an unconnected pong:
-        byte packetId = datagram.getData()[0];
+        byte packetId = datagram.getBuffer()[0];
         if ( packetId == UNCONNECTED_PONG ) {
-            this.handleUnconnectedPong( datagram );
+            this.handleUnconnectedPong( sender, datagram );
             return true;
         }
 
@@ -192,9 +211,9 @@ public class ClientSocket extends Socket {
      * @param time     The current system time
      */
     @Override
-    protected void handleDatagram( DatagramPacket datagram, long time ) {
+    protected void handleDatagram( InetSocketAddress sender, PacketBuffer datagram, long time ) {
         if ( this.connection != null ) {
-            this.connection.handleDatagram( datagram, time );
+            this.connection.handleDatagram( sender, datagram, time );
         }
     }
 
@@ -215,15 +234,6 @@ public class ClientSocket extends Socket {
                 }
             }
         }
-    }
-
-    /**
-     * Invoked after the receive thread was stopped but right before it terminates. May perform any necessary
-     * cleanup.
-     */
-    @Override
-    protected void cleanupReceiveThread() {
-
     }
 
     /**
@@ -250,7 +260,7 @@ public class ClientSocket extends Socket {
      * @param buffer    The buffer to transmit
      * @throws IOException Thrown if the transmission fails
      */
-    void send( SocketAddress recipient, PacketBuffer buffer ) throws IOException {
+    void send( InetSocketAddress recipient, PacketBuffer buffer ) throws IOException {
         this.send( recipient, buffer.getBuffer(), buffer.getBufferOffset(), buffer.getPosition() - buffer.getBufferOffset() );
     }
 
@@ -264,8 +274,8 @@ public class ClientSocket extends Socket {
      * @param length    The length of the data chunk to send
      * @throws IOException Thrown if the transmission fails
      */
-    void send( SocketAddress recipient, byte[] buffer, int offset, int length ) throws IOException {
-        this.channel.send( ByteBuffer.wrap( buffer, offset, length ), recipient );
+    void send( InetSocketAddress recipient, byte[] buffer, int offset, int length ) throws IOException {
+        this.channel.writeAndFlush( new DatagramPacket( Unpooled.wrappedBuffer( buffer, offset, length ), recipient ) );
     }
 
     /**
@@ -329,22 +339,23 @@ public class ClientSocket extends Socket {
      *
      * @param datagram The datagram containing the unconnected pong packet
      */
-    private void handleUnconnectedPong( DatagramPacket datagram ) {
-        PacketBuffer buffer = new PacketBuffer( datagram.getData(), 0 );
-        buffer.skip( 1 );                   // Packet ID
+    private void handleUnconnectedPong( InetSocketAddress sender, PacketBuffer datagram ) {
+        datagram.skip( 1 );                   // Packet ID
 
-        long pingTime = buffer.readLong();
-        long serverGuid = buffer.readLong();
+        long pingTime = datagram.readLong();
+        long serverGuid = datagram.readLong();
+        datagram.readOfflineMessageDataId();
+
         String motd = null;
-        if ( buffer.getRemaining() > 0 ) {
-            int motdLength = buffer.readUShort();
+        if ( datagram.getRemaining() > 0 ) {
+            int motdLength = datagram.readUShort();
             byte[] motdBytes = new byte[motdLength];
-            buffer.readBytes( motdBytes );
+            datagram.readBytes( motdBytes );
 
             motd = new String( motdBytes, StandardCharsets.US_ASCII );
         }
 
-        SocketEvent.PingPongInfo info = new SocketEvent.PingPongInfo( datagram.getSocketAddress(),
+        SocketEvent.PingPongInfo info = new SocketEvent.PingPongInfo( sender,
                 pingTime,
                 System.currentTimeMillis(),
                 serverGuid,

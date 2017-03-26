@@ -1,5 +1,7 @@
 package io.gomint.jraknet;
 
+import io.netty.buffer.ByteBuf;
+import io.netty.channel.Channel;
 import org.slf4j.Logger;
 
 import java.io.IOException;
@@ -18,7 +20,7 @@ class ServerConnection extends Connection {
 	// References
 	private final ServerSocket server;
 
-	ServerConnection( ServerSocket server, SocketAddress address, ConnectionState initialState ) {
+	ServerConnection( ServerSocket server, InetSocketAddress address, ConnectionState initialState ) {
 		super( address, initialState );
 		this.server = server;
 	}
@@ -35,7 +37,7 @@ class ServerConnection extends Connection {
 	 * @throws IOException Thrown in case the data could not be sent for some reason
 	 */
 	@Override
-	protected void sendRaw( SocketAddress recipient, PacketBuffer buffer ) throws IOException {
+	protected void sendRaw( InetSocketAddress recipient, PacketBuffer buffer ) throws IOException {
 		this.server.send( recipient, buffer );
 	}
 
@@ -58,15 +60,15 @@ class ServerConnection extends Connection {
 	 * @return Whether or not the datagram was handled already and should be processed no further
 	 */
 	@Override
-	protected boolean handleDatagram0( DatagramPacket datagram, long time ) {
+	protected boolean handleDatagram0( InetSocketAddress sender, PacketBuffer datagram, long time ) {
 		// Handle special internal packets:
-		byte packetId = datagram.getData()[0];
+		byte packetId = datagram.getBuffer()[0];
 		switch ( packetId ) {
 			case OPEN_CONNECTION_REQUEST_1:
-				this.handlePreConnectionRequest1( datagram );
+				this.handlePreConnectionRequest1( sender, datagram );
 				return true;
 			case OPEN_CONNECTION_REQUEST_2:
-				this.handlePreConnectionRequest2( datagram );
+				this.handlePreConnectionRequest2( sender, datagram );
 				return true;
 		}
 		return false;
@@ -123,15 +125,17 @@ class ServerConnection extends Connection {
 
 	// ================================ PACKET HANDLERS ================================ //
 
-	private void handlePreConnectionRequest1( DatagramPacket datagram ) {
+	private void handlePreConnectionRequest1( InetSocketAddress sender, PacketBuffer datagram ) {
 		if ( this.getState() != ConnectionState.UNCONNECTED ) {
 			// Connection is not in a valid state to handle this packet:
 			return;
 		}
 
 		this.setState( ConnectionState.INITIALIZING );
+		datagram.skip( 1 );
+		datagram.readOfflineMessageDataId();
 
-		byte remoteProtocol = datagram.getData()[1 + RakNetConstraints.OFFLINE_MESSAGE_DATA_ID.length];
+		byte remoteProtocol = datagram.readByte();
 
 		// Check for correct protocol:
 		if ( remoteProtocol != RAKNET_PROTOCOL_VERSION ) {
@@ -140,21 +144,20 @@ class ServerConnection extends Connection {
 			return;
 		}
 
-		this.sendConnectionReply1( datagram );
+		this.sendConnectionReply1( sender, datagram.getRemaining() + 18 );
 	}
 
-	private void handlePreConnectionRequest2( DatagramPacket datagram ) {
+	private void handlePreConnectionRequest2( InetSocketAddress sender, PacketBuffer datagram ) {
 		if ( this.getState() != ConnectionState.INITIALIZING ) {
 			// Connection is not in a valid state to handle this packet:
 			return;
 		}
 
-		PacketBuffer buffer = new PacketBuffer( datagram.getData(), 0 );
-		buffer.skip( 1 );                                                                       // Packet ID
-		buffer.readOfflineMessageDataId();                                                      // Offline Message Data ID
-		@SuppressWarnings( "unused" ) InetSocketAddress bindAddress = buffer.readAddress();     // Address the client bound to
-		this.setMtuSize( buffer.readUShort() );                                                 // MTU
-		this.setGuid( buffer.readLong() );                                                      // Client GUID
+		datagram.skip( 1 );                                                                       // Packet ID
+		datagram.readOfflineMessageDataId();                                                      // Offline Message Data ID
+		@SuppressWarnings( "unused" ) InetSocketAddress bindAddress = datagram.readAddress();     // Address the client bound to
+		this.setMtuSize( datagram.readUShort() );                                                 // MTU
+		this.setGuid( datagram.readLong() );                                                      // Client GUID
 
 		if ( !this.server.testAddressAndGuid( this ) ) {
 			this.sendAlreadyConnected();
@@ -237,21 +240,22 @@ class ServerConnection extends Connection {
 		}
 	}
 
-	private void sendConnectionReply1( DatagramPacket request ) {
+	private void sendConnectionReply1( InetSocketAddress sender, int length ) {
 		// The request packet will be as large as possible in order to determine the MTU size:
-		int mtuSize = request.getLength() + UDP_DATAGRAM_HEADER_SIZE;
+		int mtuSize = length;
 		if ( mtuSize > MAXIMUM_MTU_SIZE ) {
 			mtuSize = MAXIMUM_MTU_SIZE;
 		}
 
-		PacketBuffer buffer = new PacketBuffer( 24 );
+		PacketBuffer buffer = new PacketBuffer( 28 );
 		buffer.writeByte( OPEN_CONNECTION_REPLY_1 );
 		buffer.writeOfflineMessageDataId();
 		buffer.writeLong( this.server.getGuid() );
 		buffer.writeByte( (byte) 0x00 ); // We are not using LIBCAT Security
 		buffer.writeUShort( mtuSize );
+
 		try {
-			this.sendRaw( this.getAddress(), buffer );
+			this.sendRaw( sender, buffer );
 		} catch ( IOException ignored ) {
 			// ._.
 		}
@@ -282,6 +286,7 @@ class ServerConnection extends Connection {
 		buffer.writeByte( OPEN_CONNECTION_REPLY_2 );    // Packet ID
 		buffer.writeOfflineMessageDataId();             // Offline Message Data ID
 		buffer.writeLong( this.server.getGuid() );      // Server GUID
+		buffer.writeAddress( this.getAddress() );
 		buffer.writeUShort( this.getMtuSize() );        // MTU
 		buffer.writeBoolean( false );                   // Not using LIBCAT Security
 		try {
@@ -292,10 +297,10 @@ class ServerConnection extends Connection {
 	}
 
 	private void sendConnectionRequestAccepted( long timestamp ) {
-		PacketBuffer buffer = new PacketBuffer( 98 );
+		PacketBuffer buffer = new PacketBuffer( 94 );
 		buffer.writeByte( CONNECTION_REQUEST_ACCEPTED );            // Packet ID
 		buffer.writeAddress( this.getAddress() );                   // Remote system address
-		//buffer.writeUInt( 0 );                                      // Remote system index (not applicable)
+		buffer.writeShort( (short) 0 );                                    // Remote system index (not applicable)
 		for ( int i = 0; i < MAX_LOCAL_IPS; ++i ) {                 // Local IP Addresses
 			buffer.writeAddress( LOCAL_IP_ADDRESSES[i] );
 		}
@@ -303,7 +308,7 @@ class ServerConnection extends Connection {
 		buffer.writeLong( System.currentTimeMillis() );             // Current Time (used for latency detection)
 
 		// Send to client reliably!
-		this.send( PacketReliability.RELIABLE, 0, buffer.getBuffer() );
+		this.send( PacketReliability.RELIABLE, 0, buffer.getBuffer(),0, buffer.getPosition() );
 	}
 
 	private void sendConnectionRequestFailed() {

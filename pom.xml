@@ -6,7 +6,7 @@
 
     <groupId>io.gomint</groupId>
     <artifactId>jraknet</artifactId>
-    <version>3.2.7-0.15.4-SNAPSHOT</version>
+    <version>3.2.8-SNAPSHOT</version>
 
     <!-- Distribution Management -->
     <distributionManagement>
@@ -35,6 +35,36 @@
             <artifactId>junit</artifactId>
             <version>4.12</version>
             <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>io.netty</groupId>
+            <artifactId>netty-handler</artifactId>
+            <version>4.1.9.Final</version>
+        </dependency>
+
+        <dependency>
+            <groupId>io.netty</groupId>
+            <artifactId>netty-common</artifactId>
+            <version>4.1.9.Final</version>
+        </dependency>
+
+        <dependency>
+            <groupId>io.netty</groupId>
+            <artifactId>netty-buffer</artifactId>
+            <version>4.1.9.Final</version>
+        </dependency>
+
+        <dependency>
+            <groupId>io.netty</groupId>
+            <artifactId>netty-transport</artifactId>
+            <version>4.1.9.Final</version>
+        </dependency>
+
+        <dependency>
+            <groupId>io.netty</groupId>
+            <artifactId>netty-transport-native-epoll</artifactId>
+            <version>4.1.9.Final</version>
         </dependency>
     </dependencies>
 

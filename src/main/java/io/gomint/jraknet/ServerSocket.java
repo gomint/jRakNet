@@ -1,18 +1,24 @@
 package io.gomint.jraknet;
 
+import io.netty.bootstrap.Bootstrap;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.epoll.Epoll;
+import io.netty.channel.epoll.EpollDatagramChannel;
+import io.netty.channel.epoll.EpollEventLoopGroup;
+import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.DatagramPacket;
+import io.netty.channel.socket.nio.NioDatagramChannel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.net.DatagramPacket;
-import java.net.DatagramSocket;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.SocketException;
-import java.nio.ByteBuffer;
-import java.nio.channels.DatagramChannel;
 import java.nio.charset.StandardCharsets;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
@@ -23,7 +29,8 @@ import static io.gomint.jraknet.RakNetConstraints.*;
 
 /**
  * @author BlackyPaw
- * @version 1.0
+ * @author geNAZt
+ * @version 2.0
  */
 public class ServerSocket extends Socket {
 
@@ -115,17 +122,29 @@ public class ServerSocket extends Socket {
 		}
 
 		// Automatically binds socket to address (no further #bind() call required)
-		try {
-			this.channel = DatagramChannel.open();
-			this.channel.configureBlocking( false );
-			this.udpSocket = this.channel.socket();
-			this.udpSocket.bind( address );
+		this.udpSocket = new Bootstrap();
+		this.udpSocket.group( Epoll.isAvailable() ? new EpollEventLoopGroup() : new NioEventLoopGroup() );
+		this.udpSocket.channel( Epoll.isAvailable() ? EpollDatagramChannel.class : NioDatagramChannel.class );
+		this.udpSocket.handler( new ChannelInboundHandlerAdapter() {
+			@Override
+			public void channelRead( ChannelHandlerContext ctx, Object msg) throws Exception {
+				DatagramPacket packet = (DatagramPacket) msg;
+				PacketBuffer content = new PacketBuffer( packet.content() );
+				InetSocketAddress sender = packet.sender();
 
-			// Buffers ?!
-			this.udpSocket.setReceiveBufferSize( 1024 * 1024 * 8 );
-			this.udpSocket.setSendBufferSize( 1024 * 1024 * 8 );
-		} catch ( IOException e ) {
-			throw new SocketException( e.getMessage() );
+				if ( !receiveDatagram( sender, content ) ) {
+					// Push datagram to update queue:
+					handleDatagram( sender, content, System.currentTimeMillis() );
+				}
+			}
+		} );
+
+		try {
+			this.channel = this.udpSocket.bind( address ).sync().channel();
+		} catch ( InterruptedException e ) {
+			SocketException exception = new SocketException( "Could not bind to socket" );
+			exception.initCause( e );
+			throw exception;
 		}
 
 		this.bindAddress = address;
@@ -178,13 +197,14 @@ public class ServerSocket extends Socket {
 	 * @return Whether or not the datagram was handled by this method already and should be processed no further
 	 */
 	@Override
-	protected boolean receiveDatagram( DatagramPacket datagram ) {
+	protected boolean receiveDatagram( InetSocketAddress sender, PacketBuffer datagram ) {
 		// Handle unconnected pings:
-		byte packetId = datagram.getData()[0];
+		byte packetId = datagram.getBuffer()[0];
 		if ( packetId == UNCONNECTED_PING ) {
-			this.handleUnconnectedPing( datagram );
+			this.handleUnconnectedPing( sender, datagram );
 			return true;
 		}
+
 		return false;
 	}
 
@@ -196,14 +216,14 @@ public class ServerSocket extends Socket {
 	 * @param time     The current system time
 	 */
 	@Override
-	protected void handleDatagram( DatagramPacket datagram, long time ) {
-		ServerConnection connection = this.getConnection( datagram );
+	protected void handleDatagram( InetSocketAddress sender, PacketBuffer datagram, long time ) {
+		ServerConnection connection = this.getConnection( sender, datagram );
 		if ( connection != null ) {
 			// #getConnection() may return null if there is currently no connection
 			// associated with the socket address the datagram came from and the
 			// datagram itself does not contain the first packet of the connection
 			// attempt chain:
-			connection.handleDatagram( datagram, time );
+			connection.handleDatagram( sender, datagram, time );
 		}
 	}
 
@@ -237,15 +257,6 @@ public class ServerSocket extends Socket {
 				}
 			}
 		}
-	}
-
-	/**
-	 * Invoked after the receive thread was stopped but right before it terminates. May perform any necessary
-	 * cleanup.
-	 */
-	@Override
-	protected void cleanupReceiveThread() {
-
 	}
 
 	/**
@@ -298,7 +309,7 @@ public class ServerSocket extends Socket {
 	 *
 	 * @throws IOException Thrown if the transmission fails
 	 */
-	void send( SocketAddress recipient, PacketBuffer buffer ) throws IOException {
+	void send( InetSocketAddress recipient, PacketBuffer buffer ) throws IOException {
 		this.send( recipient, buffer.getBuffer(), buffer.getBufferOffset(), buffer.getPosition() - buffer.getBufferOffset() );
 	}
 
@@ -313,8 +324,8 @@ public class ServerSocket extends Socket {
 	 *
 	 * @throws IOException Thrown if the transmission fails
 	 */
-	void send( SocketAddress recipient, byte[] buffer, int offset, int length ) throws IOException {
-		this.channel.send( ByteBuffer.wrap( buffer, offset, length ), recipient );
+	void send( InetSocketAddress recipient, byte[] buffer, int offset, int length ) throws IOException {
+		channel.writeAndFlush( new DatagramPacket( Unpooled.wrappedBuffer( buffer, offset, length ), recipient ) );
 	}
 
 	/**
@@ -378,22 +389,14 @@ public class ServerSocket extends Socket {
 	 *
 	 * @param datagram The datagram containing the ping request
 	 */
-	private void handleUnconnectedPing( DatagramPacket datagram ) {
+	private void handleUnconnectedPing( InetSocketAddress sender, PacketBuffer datagram ) {
 		// Indeed, rather ugly but avoids the relatively unnecessary cost of
 		// constructing yet another packet buffer instance:
-		byte[] buffer = datagram.getData();
-		int    index  = 1;
-		long sendPingTime = ( ( (long) buffer[index++] << 56 ) |
-		                      ( (long) buffer[index++] << 48 ) |
-		                      ( (long) buffer[index++] << 40 ) |
-		                      ( (long) buffer[index++] << 32 ) |
-		                      ( (long) buffer[index++] << 24 ) |
-		                      ( (long) buffer[index++] << 16 ) |
-		                      ( (long) buffer[index++] << 8 ) |
-		                      ( (long) buffer[index] ) );
+		datagram.skip( 1 );
+		long sendPingTime = datagram.readLong();
 
 		// Let the SocketEventHandler decide what to send
-		SocketEvent.PingPongInfo info = new SocketEvent.PingPongInfo( datagram.getSocketAddress(), sendPingTime, sendPingTime, -1, this.motd, this.activeConnections.size(), this.maxConnections );
+		SocketEvent.PingPongInfo info = new SocketEvent.PingPongInfo( sender, sendPingTime, sendPingTime, -1, this.motd, this.activeConnections.size(), this.maxConnections );
 		this.propagateEvent( new SocketEvent( SocketEvent.Type.UNCONNECTED_PING, info ) );
 
 		byte[] motdBytes = String.format( MOTD_FORMAT, info.getMotd(), info.getOnlineUsers(), info.getMaxUsers() ).getBytes( StandardCharsets.UTF_8 );
@@ -404,8 +407,9 @@ public class ServerSocket extends Socket {
 		packet.writeOfflineMessageDataId();
 		packet.writeUShort( motdBytes.length );
 		packet.writeBytes( motdBytes );
+
 		try {
-			this.send( datagram.getSocketAddress(), packet );
+			this.send( sender, packet );
 		} catch ( IOException ignored ) {
 			// ._.
 		}
@@ -429,18 +433,19 @@ public class ServerSocket extends Socket {
 	 * @param datagram The datagram buffer holding the actual datagram data. USed to access socket address of sender and packet ID
 	 * @return The connection of the given address or null (see above)
 	 */
-	private ServerConnection getConnection( DatagramPacket datagram ) {
-		ServerConnection connection = this.connectionsByAddress.get( datagram.getSocketAddress() );
+	private ServerConnection getConnection( InetSocketAddress sender, PacketBuffer datagram ) {
+		ServerConnection connection = this.connectionsByAddress.get( sender );
 		if ( connection == null ) {
 			// Only construct a new server connection if this datagram contains
 			// a valid OPEN_CONNECTION_REQUEST_1 packet as this might be a discarded
 			// or invalid connection receive otherwise:
-			byte packetId = datagram.getData()[0];
+			byte packetId = datagram.getBuffer()[0];
 			if ( packetId == OPEN_CONNECTION_REQUEST_1 ) {
-				connection = new ServerConnection( this, datagram.getSocketAddress(), ConnectionState.UNCONNECTED );
-				this.connectionsByAddress.put( datagram.getSocketAddress(), connection );
+				connection = new ServerConnection( this, sender, ConnectionState.UNCONNECTED );
+				this.connectionsByAddress.put( sender, connection );
 			}
 		}
+
 		return connection;
 	}
 

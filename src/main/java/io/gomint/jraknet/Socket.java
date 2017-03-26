@@ -1,58 +1,36 @@
 package io.gomint.jraknet;
 
+import io.netty.bootstrap.Bootstrap;
+import io.netty.buffer.ByteBuf;
+import io.netty.channel.Channel;
+import io.netty.channel.socket.DatagramPacket;
 import org.slf4j.Logger;
 
 import java.io.IOException;
-import java.net.DatagramPacket;
-import java.net.DatagramSocket;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.DatagramChannel;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
-import java.nio.channels.spi.SelectorProvider;
 import java.util.Arrays;
-import java.util.Iterator;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.locks.Condition;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
 
 import static io.gomint.jraknet.RakNetConstraints.MAXIMUM_MTU_SIZE;
 
 /**
  * @author BlackyPaw
- * @version 1.0
+ * @author geNAZt
+ * @version 2.0
  */
 public abstract class Socket implements AutoCloseable {
 
-    private static final Random random = new Random();
-
-    // We allocate buffers able to hold twice the maximum MTU size for the reasons listed below:
-    //
-    // Somehow I noticed receiving datagrams that exceeded their respective connection's MTU by
-    // far whenever they contained a Batch Packet. As this behaviour comes out of seemingly
-    // nowhere yet we do need to receive these batch packets we must have room enough to actually
-    // gather all this data even though it does not seem legit to allocate larger buffers for this
-    // reason. But as the underlying DatagramSocket provides no way of grabbing the minimum required
-    // buffer size for the datagram we are forced to play this dirty trick. If - at any point in the
-    // future - this behaviour changes, please add this buffer size back to its original value:
-    // MAXIMUM_MTU_SIZE.
-    //
-    // Examples of too large datagrams:
-    //  - Datagram containing BatchPacket for LoginPacket: 1507 bytes the batch packet alone (5th of March 2016)
-    //
-    // Suggestions:
-    //  - Make this value configurable in order to easily adjust this value whenever necessary
-    private static final int INTERNAL_BUFFER_SIZE = MAXIMUM_MTU_SIZE << 1;
-
-    protected DatagramSocket udpSocket;
-    protected DatagramChannel channel;
+    protected Bootstrap udpSocket;
+    protected Channel channel;
 
     // Threads used for modeling network "events"
     private ThreadFactory eventLoopFactory;
@@ -139,7 +117,8 @@ public abstract class Socket implements AutoCloseable {
         }
 
         // Close the UDP socket:
-        this.udpSocket.close();
+        this.channel.close();
+        this.channel = null;
         this.udpSocket = null;
 
         this.receiveThread.interrupt();
@@ -165,10 +144,11 @@ public abstract class Socket implements AutoCloseable {
      * Invoked right after a datagram was received. This method may perform very rudimentary
      * datagram handling if necessary.
      *
+     * @param sender  The channel which sent this datagram
      * @param datagram The datagram that was just received
      * @return Whether or not the datagram was handled by this method already and should be processed no further
      */
-    protected boolean receiveDatagram( DatagramPacket datagram ) {
+    protected boolean receiveDatagram( InetSocketAddress sender, PacketBuffer datagram ) {
         return false;
     }
 
@@ -176,10 +156,11 @@ public abstract class Socket implements AutoCloseable {
      * Handles the given datagram. This will be invoked on the socket's update thread and should hand
      * this datagram to the connection it belongs to in order to deserialize it appropriately.
      *
+     * @param sender  The channel which this datagram sent
      * @param datagram The datagram to be handled
      * @param time     The current system time
      */
-    protected abstract void handleDatagram( DatagramPacket datagram, long time );
+    protected abstract void handleDatagram( InetSocketAddress sender, PacketBuffer datagram, long time );
 
     /**
      * Updates all connections this socket created.
@@ -187,14 +168,6 @@ public abstract class Socket implements AutoCloseable {
      * @param time The current system time
      */
     protected abstract void updateConnections( long time );
-
-    /**
-     * Invoked after the receive thread was stopped but right before it terminates. May perform any necessary
-     * cleanup.
-     */
-    protected void cleanupReceiveThread() {
-
-    }
 
     /**
      * Invoked after the update thread was stopped but right before it terminates. May perform any necessary
@@ -212,7 +185,7 @@ public abstract class Socket implements AutoCloseable {
      * are connections that have already been established.
      */
     protected final void generateGuid() {
-        this.guid = random.nextLong();
+        this.guid = ThreadLocalRandom.current().nextLong();
     }
 
     /**
@@ -272,86 +245,6 @@ public abstract class Socket implements AutoCloseable {
         } );
 
         this.updateThread.start();
-
-        this.receiveThread = this.eventLoopFactory.newThread( new Runnable() {
-            @Override
-            public void run() {
-                Socket.this.pollUdpSocket();
-            }
-        } );
-
-        this.receiveThread.start();
-    }
-
-    /**
-     * Polls the socket's internal datagram socket and pushes off any received datagrams
-     * to dedicated handlers that will decode the datagram into actual data packets.
-     */
-    private void pollUdpSocket() {
-        try {
-            Selector selector = Selector.open();
-            this.channel.register( selector, SelectionKey.OP_READ );
-
-            while ( this.running.get() ) {
-                int readyChannels = selector.select( 1000 );
-                if ( readyChannels == 0 ) continue;
-
-                Set<SelectionKey> selectedKeys = selector.selectedKeys();
-                for ( SelectionKey key : selectedKeys ) {
-                    // ---------------------------------------------------------------------------
-                    // Allocate a 2^16 bytes long buffer
-                    // ---------------------------------------------------------------------------
-                    // During testing we encountered situations in which MCPE exceeded
-                    // the MTU size by far by unpredictable amounts of data. Even occasions
-                    // with more than 7x the actual MTU size haven been seen. Thus there was
-                    // the need to be able to potentially get ALL possible datagrams no
-                    // matter if they exceed the MTU thus do not fit into our pre-allocated
-                    // buffers and thus have their remaining data discarded. This is where
-                    // this buffer comes into play.
-                    //
-                    // The UDP header possesses a 16-bit field encoding the length of the
-                    // datagram. Therefore the longest possible size of any datagram is
-                    // 2^16 bytes and thus all datagrams will be able to fit into this buffer
-                    // without losing any data at all.
-                    // Unfortunately though no one would appreciate it if we would pre-allocate
-                    // multiple 64kB buffers for smaller datagrams which is why I came up with
-                    // the following idea:
-                    // The data received from the socket is first copied into this recvbuf so
-                    // that we will be able to get ALL data. Afterwards we take check whether
-                    // or not the datagram's actual length would fit into one of the buffers
-                    // we preallocated (~2kB) and if so the data is copied into one of these
-                    // buffers. Otherwise we manually allocate a new array just large enough
-                    // to hold our datagram and pass it through the system deleting it once
-                    // it was pushed to the end-user.
-                    // ---------------------------------------------------------------------------
-                    ByteBuffer buffer = ByteBuffer.allocate( 65536 );
-
-                    try {
-                        InetSocketAddress socketAddress = (InetSocketAddress) ( (DatagramChannel) key.channel() ).receive( buffer );
-                        if ( socketAddress == null ) {
-                            continue;
-                        }
-
-                        DatagramPacket packet = new DatagramPacket( new byte[buffer.position()], buffer.position() );
-                        packet.setAddress( socketAddress.getAddress() );
-                        packet.setPort( socketAddress.getPort() );
-                        packet.setLength( buffer.position() );
-                        packet.setData( Arrays.copyOf( buffer.array(), packet.getLength() ) );
-
-                        if ( !this.receiveDatagram( packet ) ) {
-                            // Push datagram to update queue:
-                            this.handleDatagram( packet, System.currentTimeMillis() );
-                        }
-                    } catch ( Exception e ) {
-                        e.printStackTrace();
-                    }
-                }
-
-                selectedKeys.clear();
-            }
-        } catch ( IOException e ) {
-            e.printStackTrace();
-        }
     }
 
     private void update() {
