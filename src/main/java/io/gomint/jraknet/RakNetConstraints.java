@@ -103,10 +103,10 @@ public class RakNetConstraints {
 	// =========================== MOJANG STUFF =========================== //
 
 	// Version of Pocket Edition's protocol (needs to be figured out by testing different values inside ping)
-	public static final int MINECRAFT_PE_PROTOCOL_VERSION = 102;
+	public static final int MINECRAFT_PE_PROTOCOL_VERSION = 105;
 
 	// Version of the Pocket Edition server (may be found in main menu)
-	public static final String MINECRAFT_PE_NETWORK_VERSION = "1.0.4";
+	public static final String MINECRAFT_PE_NETWORK_VERSION = "1.0.5";
 
 	// Format for all MOTD messages:
 	//  - 0: String with actual MOTD
