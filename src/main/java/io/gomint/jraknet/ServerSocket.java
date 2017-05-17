@@ -1,7 +1,6 @@
 package io.gomint.jraknet;
 
 import io.netty.bootstrap.Bootstrap;
-import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
@@ -46,9 +45,6 @@ public class ServerSocket extends Socket {
 	private       Map<Long, ServerConnection>          connectionsByGuid;
 	private       Set<ServerConnection>                activeConnections;
 
-	// MOTD-Workaround for Mojang MOTD:
-	private String motd;
-
 	/**
 	 * Constructs a new server socket which will allow for maxConnections concurrently playing
 	 * players at max.
@@ -59,7 +55,6 @@ public class ServerSocket extends Socket {
 		this.logger = LoggerFactory.getLogger( ServerSocket.class );
 		this.maxConnections = maxConnections;
 		this.activeConnections = new HashSet<>();
-		this.setMotd( "GoMint" );
 		this.generateGuid();
 	}
 
@@ -73,29 +68,10 @@ public class ServerSocket extends Socket {
 		this.logger = logger;
 		this.maxConnections = maxConnections;
 		this.activeConnections = new HashSet<>();
-		this.setMotd( "GoMint" );
 		this.generateGuid();
 	}
 
 	// ================================ PUBLIC API ================================ //
-
-	/**
-	 * Sets the MOTD to be sent inside ping packets.
-	 *
-	 * @param motd The motd to be sent inside ping packets
-	 */
-	public void setMotd( String motd ) {
-		this.motd = motd;
-	}
-
-	/**
-	 * Gets the MOTD that is sent inside ping packets.
-	 *
-	 * @return The MOTD sent inside ping packets
-	 */
-	public String getMotd() {
-		return this.motd;
-	}
 
 	/**
 	 * Binds the server socket to the specified port. This operation initializes this socket.
@@ -396,10 +372,10 @@ public class ServerSocket extends Socket {
 		long sendPingTime = datagram.readLong();
 
 		// Let the SocketEventHandler decide what to send
-		SocketEvent.PingPongInfo info = new SocketEvent.PingPongInfo( sender, sendPingTime, sendPingTime, -1, this.motd, this.activeConnections.size(), this.maxConnections );
+		SocketEvent.PingPongInfo info = new SocketEvent.PingPongInfo( sender, sendPingTime, sendPingTime, -1, "" );
 		this.propagateEvent( new SocketEvent( SocketEvent.Type.UNCONNECTED_PING, info ) );
 
-		byte[] motdBytes = String.format( MOTD_FORMAT, info.getMotd(), info.getOnlineUsers(), info.getMaxUsers() ).getBytes( StandardCharsets.UTF_8 );
+		byte[] motdBytes = info.getMotd().getBytes( StandardCharsets.UTF_8 );
 		PacketBuffer packet = new PacketBuffer( 35 + motdBytes.length );
 		packet.writeByte( UNCONNECTED_PONG );
 		packet.writeLong( sendPingTime );

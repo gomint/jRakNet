@@ -63,10 +63,6 @@ public class SocketEvent {
 		private final long          remoteGuid;
 		private String              motd;
 
-		// Ping specific
-		private int                 onlineUsers;
-		private int                 maxUsers;
-
 		PingPongInfo( final SocketAddress address, final long pingTime, final long pongTime, final long remoteGuid, final String motd ) {
 			this.address = address;
 			this.pingTime = pingTime;
@@ -74,12 +70,6 @@ public class SocketEvent {
 			this.remoteGuid = remoteGuid;
 			this.motd = motd;
 		}
-
-        PingPongInfo( final SocketAddress address, final long pingTime, final long pongTime, final long remoteGuid, final String motd, final int onlineUsers, final int maxUsers ) {
-            this( address, pingTime, pongTime, remoteGuid, motd );
-            this.onlineUsers = onlineUsers;
-            this.maxUsers = maxUsers;
-        }
 
 		public SocketAddress getAddress() {
 			return this.address;
@@ -103,22 +93,6 @@ public class SocketEvent {
 
 		public void setMotd(String motd) {
 			this.motd = motd;
-		}
-
-		public int getOnlineUsers() {
-			return this.onlineUsers;
-		}
-
-		public void setOnlineUsers(int onlineUsers) {
-			this.onlineUsers = onlineUsers;
-		}
-
-		public int getMaxUsers() {
-			return this.maxUsers;
-		}
-
-		public void setMaxUsers(int maxUsers) {
-			this.maxUsers = maxUsers;
 		}
 
 	}

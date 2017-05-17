@@ -99,21 +99,6 @@ public class RakNetConstraints {
 
 	public static final byte USER_PACKET_ENUM = (byte) 0x80;
 
-
-	// =========================== MOJANG STUFF =========================== //
-
-	// Version of Pocket Edition's protocol (needs to be figured out by testing different values inside ping)
-	public static final int MINECRAFT_PE_PROTOCOL_VERSION = 105;
-
-	// Version of the Pocket Edition server (may be found in main menu)
-	public static final String MINECRAFT_PE_NETWORK_VERSION = "1.0.5";
-
-	// Format for all MOTD messages:
-	//  - 0: String with actual MOTD
-	//  - 1: Integer with current player count
-	//  - 2: Integer with maximum player count
-	public static final String MOTD_FORMAT = "MCPE;%s;" + MINECRAFT_PE_PROTOCOL_VERSION + ";" + MINECRAFT_PE_NETWORK_VERSION + ";%d;%d";
-
 	private RakNetConstraints() {
 		throw new AssertionError( "Cannot instantiate RakNetConstraints" );
 	}
