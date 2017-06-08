@@ -202,7 +202,7 @@ public class PacketBuffer {
             in = this.readByte();
             out |= ( in & 0x7F ) << ( bytes++ * 7 );
 
-            if ( bytes > 5 ) {
+            if ( bytes > 6 ) {
                 throw new RuntimeException( "VarInt too big" );
             }
         } while ( ( in & 0x80 ) == 0x80 );
@@ -224,7 +224,7 @@ public class PacketBuffer {
             in = this.readByte();
             out |= ( in & 0x7F ) << ( bytes++ * 7 );
 
-            if ( bytes > 7 ) {
+            if ( bytes > 10 ) {
                 throw new RuntimeException( "VarInt too big" );
             }
         } while ( ( in & 0x80 ) == 0x80 );

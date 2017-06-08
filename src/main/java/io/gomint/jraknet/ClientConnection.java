@@ -199,12 +199,12 @@ class ClientConnection extends Connection {
 		PacketBuffer buffer = new PacketBuffer( packet.getPacketData(), 0 );
 		buffer.skip( 1 );                                                                       // Packet ID
 		buffer.readAddress();                                                                   // Client Address
-		if ( packet.getPacketLength() == 96 ) {
-			buffer.readUShort();                                                                // Remote System Index (not always applicable)
-		}
+		buffer.readUShort();                                                               		// Remote System Index (not always applicable)
+
 		for ( int i = 0; i < MAX_LOCAL_IPS; ++i ) {
 			buffer.readAddress();                                                               // Server Local IPs
 		}
+
 		@SuppressWarnings( "unused" ) long pingTime = buffer.readLong();                        // Ping Time
 		long pongTime = buffer.readLong();                                                      // Pong Time
 
