@@ -300,7 +300,7 @@ class ServerConnection extends Connection {
 		PacketBuffer buffer = new PacketBuffer( 94 );
 		buffer.writeByte( CONNECTION_REQUEST_ACCEPTED );            // Packet ID
 		buffer.writeAddress( this.getAddress() );                   // Remote system address
-		buffer.writeShort( (short) 0 );                                    // Remote system index (not applicable)
+		buffer.writeShort( (short) 0 );                             // Remote system index (not applicable)
 		for ( int i = 0; i < MAX_LOCAL_IPS; ++i ) {                 // Local IP Addresses
 			buffer.writeAddress( LOCAL_IP_ADDRESSES[i] );
 		}
