@@ -77,6 +77,7 @@ public abstract class Connection {
     private String disconnectMessage;
 
     // Ping / Pong:
+    private long currentPingTime;
     protected long lastPingTime;
     protected long lastPongTime;
 
@@ -405,7 +406,7 @@ public abstract class Connection {
      * @param time The current system time
      */
     protected void preUpdate( long time ) {
-        if ( this.isConnected() && this.lastPingTime + 2000L < time ) {
+        if ( this.isConnected() && this.currentPingTime + 2000L < time ) {
             this.sendConnectedPing( time );
         }
     }
@@ -1190,7 +1191,12 @@ public abstract class Connection {
     }
 
     private void handleConnectedPong( @SuppressWarnings( "unused" ) EncapsulatedPacket packet ) {
-        this.lastPongTime = System.currentTimeMillis();
+        PacketBuffer buffer = new PacketBuffer( packet.getPacketData(), 1 );
+        long inPacket = buffer.readLong();
+        if ( inPacket == this.currentPingTime ) {
+            this.lastPingTime = this.currentPingTime;
+            this.lastPongTime = System.currentTimeMillis();
+        }
     }
 
     private void handleDisconnectionNotification( @SuppressWarnings( "unused" ) EncapsulatedPacket packet ) {
@@ -1206,7 +1212,7 @@ public abstract class Connection {
         buffer.writeByte( CONNECTED_PING );
         buffer.writeLong( time );
         this.send( PacketReliability.UNRELIABLE, 0, buffer.getBuffer() );
-        this.lastPingTime = System.currentTimeMillis();
+        this.currentPingTime = time;
     }
 
     private void sendConnectedPong( long pingTime ) {
