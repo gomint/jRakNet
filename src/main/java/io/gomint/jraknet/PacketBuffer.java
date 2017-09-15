@@ -190,7 +190,7 @@ public class PacketBuffer {
     }
 
     public UUID readUUID() {
-        return new UUID( this.readLong(), this.readLong() );
+        return new UUID( this.readLLong(), this.readLLong() );
     }
 
     public int readUnsignedVarInt() {
@@ -514,8 +514,8 @@ public class PacketBuffer {
     }
 
     public void writeUUID( UUID uuid ) {
-        this.writeLong( uuid.getMostSignificantBits() );
-        this.writeLong( uuid.getLeastSignificantBits() );
+        this.writeLLong( uuid.getMostSignificantBits() );
+        this.writeLLong( uuid.getLeastSignificantBits() );
     }
 
     public void writeTriad( int v ) {
