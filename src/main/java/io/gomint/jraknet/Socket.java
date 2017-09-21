@@ -35,7 +35,6 @@ public abstract class Socket implements AutoCloseable {
     // Threads used for modeling network "events"
     private ThreadFactory eventLoopFactory;
     private Thread updateThread;
-    private Thread receiveThread;
 
     // Lifecycle
     private AtomicBoolean running = new AtomicBoolean( false );
@@ -120,15 +119,6 @@ public abstract class Socket implements AutoCloseable {
         this.channel.close();
         this.channel = null;
         this.udpSocket = null;
-
-        this.receiveThread.interrupt();
-        try {
-            this.receiveThread.join();
-        } catch ( InterruptedException e ) {
-            // ._.
-        } finally {
-            this.receiveThread = null;
-        }
     }
 
     // ================================ IMPLEMENTATION HOOKS ================================ //
