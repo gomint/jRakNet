@@ -116,7 +116,8 @@ public abstract class Socket implements AutoCloseable {
         }
 
         // Close the UDP socket:
-        this.channel.close();
+        this.channel.close().syncUninterruptibly();
+        this.channel.eventLoop().shutdownGracefully().syncUninterruptibly();
         this.channel = null;
         this.udpSocket = null;
     }
