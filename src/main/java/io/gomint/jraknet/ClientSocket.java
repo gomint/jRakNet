@@ -31,6 +31,7 @@ public class ClientSocket extends Socket {
     private final Logger logger;
 
     private ClientConnection connection;
+    boolean mojangModificationEnabled;
 
     /**
      * Constructs a new client socket ready for use.
@@ -52,6 +53,15 @@ public class ClientSocket extends Socket {
     }
 
     // ================================ PUBLIC API ================================ //
+
+    /**
+     * Enable mojang modifications to this is compatible with MC:PE
+     *
+     * @param enable The setting of the modification. True if jRaknet should handle MC:PE mods, false if not
+     */
+    public void setMojangModificationEnabled( boolean enable ) {
+        this.mojangModificationEnabled = enable;
+    }
 
     /**
      * Initializes this socket and binds its internal udp socket to a free port.
@@ -195,7 +205,7 @@ public class ClientSocket extends Socket {
     protected boolean receiveDatagram( InetSocketAddress sender, PacketBuffer datagram ) {
         // Check if this might be an unconnected pong:
         byte packetId = datagram.getBuffer()[0];
-        if ( packetId == UNCONNECTED_PONG ) {
+        if ( packetId == UNCONNECTED_PONG || packetId == UNCONNECTED_PONG_MOJANG ) {
             this.handleUnconnectedPong( sender, datagram );
             return true;
         }

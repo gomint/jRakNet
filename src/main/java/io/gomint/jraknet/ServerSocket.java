@@ -45,6 +45,9 @@ public class ServerSocket extends Socket {
 	private       Map<Long, ServerConnection>          connectionsByGuid;
 	private       Set<ServerConnection>                activeConnections;
 
+	// Modification data:
+    boolean mojangModificationEnabled;
+
 	/**
 	 * Constructs a new server socket which will allow for maxConnections concurrently playing
 	 * players at max.
@@ -72,6 +75,15 @@ public class ServerSocket extends Socket {
 	}
 
 	// ================================ PUBLIC API ================================ //
+
+    /**
+     * Enable mojang modifications to this is compatible with MC:PE
+     *
+     * @param enable The setting of the modification. True if jRaknet should handle MC:PE mods, false if not
+     */
+    public void setMojangModificationEnabled( boolean enable ) {
+        this.mojangModificationEnabled = enable;
+    }
 
 	/**
 	 * Binds the server socket to the specified port. This operation initializes this socket.
@@ -375,14 +387,25 @@ public class ServerSocket extends Socket {
 		SocketEvent.PingPongInfo info = new SocketEvent.PingPongInfo( sender, sendPingTime, sendPingTime, -1, "" );
 		this.propagateEvent( new SocketEvent( SocketEvent.Type.UNCONNECTED_PING, info ) );
 
-		byte[] motdBytes = info.getMotd().getBytes( StandardCharsets.UTF_8 );
-		PacketBuffer packet = new PacketBuffer( 35 + motdBytes.length );
-		packet.writeByte( UNCONNECTED_PONG );
+		PacketBuffer packet;
+		byte[] motdBytes = null;
+
+		if ( this.mojangModificationEnabled ) {
+			motdBytes = info.getMotd().getBytes( StandardCharsets.UTF_8 );
+			packet = new PacketBuffer( 35 + motdBytes.length );
+		} else {
+			packet = new PacketBuffer( 35 );
+		}
+
+		packet.writeByte( this.mojangModificationEnabled ? UNCONNECTED_PONG_MOJANG : UNCONNECTED_PONG );
 		packet.writeLong( sendPingTime );
 		packet.writeLong( this.getGuid() );
 		packet.writeOfflineMessageDataId();
-		packet.writeUShort( motdBytes.length );
-		packet.writeBytes( motdBytes );
+
+		if ( this.mojangModificationEnabled && motdBytes != null ) {
+            packet.writeUShort( motdBytes.length );
+            packet.writeBytes( motdBytes );
+        }
 
 		try {
 			this.send( sender, packet );

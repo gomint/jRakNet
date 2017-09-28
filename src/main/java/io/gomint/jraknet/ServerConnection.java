@@ -1,13 +1,9 @@
 package io.gomint.jraknet;
 
-import io.netty.buffer.ByteBuf;
-import io.netty.channel.Channel;
 import org.slf4j.Logger;
 
 import java.io.IOException;
-import java.net.DatagramPacket;
 import java.net.InetSocketAddress;
-import java.net.SocketAddress;
 
 import static io.gomint.jraknet.RakNetConstraints.*;
 
@@ -138,7 +134,8 @@ class ServerConnection extends Connection {
 		byte remoteProtocol = datagram.readByte();
 
 		// Check for correct protocol:
-		if ( remoteProtocol != RAKNET_PROTOCOL_VERSION ) {
+		if ( ( !server.mojangModificationEnabled && remoteProtocol != RAKNET_PROTOCOL_VERSION  ) ||
+				( server.mojangModificationEnabled && remoteProtocol != RAKNET_PROTOCOL_VERSION_MOJANG ) ) {
 			this.sendIncompatibleProtocolVersion();
 			this.setState( ConnectionState.UNCONNECTED );
 			return;
@@ -229,7 +226,7 @@ class ServerConnection extends Connection {
 	private void sendIncompatibleProtocolVersion() {
 		PacketBuffer buffer = new PacketBuffer( 22 );
 		buffer.writeByte( INCOMPATIBLE_PROTOCOL_VERSION );
-		buffer.writeByte( RAKNET_PROTOCOL_VERSION );
+		buffer.writeByte( server.mojangModificationEnabled ? RAKNET_PROTOCOL_VERSION_MOJANG : RAKNET_PROTOCOL_VERSION );
 		buffer.writeOfflineMessageDataId();
 		buffer.writeLong( this.server.getGuid() );
 		try {

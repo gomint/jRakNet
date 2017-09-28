@@ -9,7 +9,10 @@ public class RakNetConstraints {
 	// =========================== CONSTANTS =========================== //
 
 	// Version of the RakNet library's protocol MCPE is using
-	public static final byte RAKNET_PROTOCOL_VERSION = 8;
+	public static final byte RAKNET_PROTOCOL_VERSION_MOJANG = 8;
+
+	// Version of the original RakNet lib without modifications
+	public static final byte RAKNET_PROTOCOL_VERSION = 6;
 
 	// Number of ordering channels RakNet supports at max
 	public static final int NUM_ORDERING_CHANNELS = 32;
@@ -47,6 +50,9 @@ public class RakNetConstraints {
 
 	// Client -> Server
 	public static final byte UNCONNECTED_PING = (byte) 0x01;
+
+	// Server -> Client
+	public static final byte UNCONNECTED_PONG = (byte) 0x02;
 
 	// Any -> Any
 	public static final byte CONNECTED_PONG = (byte) 0x03;
@@ -94,7 +100,7 @@ public class RakNetConstraints {
 	//
 	// Note: Mojang made modifications to this packet's original data
 	//       They appended a string containing the server's MOTD at the end
-	public static final byte UNCONNECTED_PONG = (byte) 0x1C;
+	public static final byte UNCONNECTED_PONG_MOJANG = (byte) 0x1C;
 
 
 	public static final byte USER_PACKET_ENUM = (byte) 0x80;

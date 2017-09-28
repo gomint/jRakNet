@@ -223,7 +223,7 @@ class ClientConnection extends Connection {
 		PacketBuffer buffer = new PacketBuffer( MAXIMUM_MTU_SIZE );
 		buffer.writeByte( OPEN_CONNECTION_REQUEST_1 );
 		buffer.writeOfflineMessageDataId();
-		buffer.writeByte( RAKNET_PROTOCOL_VERSION );
+		buffer.writeByte( client.mojangModificationEnabled ? RAKNET_PROTOCOL_VERSION_MOJANG : RAKNET_PROTOCOL_VERSION );
 
 		// Simulate filling with zeroes, in order to "test out" maximum MTU size:
 		buffer.skip( mtuSize - 18 );
