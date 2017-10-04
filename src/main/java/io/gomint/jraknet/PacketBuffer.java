@@ -4,9 +4,7 @@ import io.gomint.jraknet.datastructures.TriadRange;
 import io.netty.buffer.ByteBuf;
 
 import java.math.BigInteger;
-import java.net.Inet4Address;
-import java.net.InetSocketAddress;
-import java.net.SocketAddress;
+import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.UUID;
@@ -18,6 +16,7 @@ import java.util.UUID;
 public class PacketBuffer {
 
     private static final BigInteger UNSIGNED_LONG_MAX_VALUE = new BigInteger( "FFFFFFFFFFFFFFFF", 16 );
+    private static final short AF_INET6 = (short) ( System.getProperty( "os.name" ).equals( "windows" ) ? 23 : 10 );
 
     private byte[] buffer;
     private int offset;
@@ -171,8 +170,21 @@ public class PacketBuffer {
             return InetSocketAddress.createUnresolved( hostname, port );
         } else {
             // Currently IPv6 is not supported!
-            this.skip( 24 );
-            return null;
+            this.readLShort();
+            int port = this.readShort();
+            this.readLong();
+            byte[] addr = new byte[16];
+            this.readBytes( addr );
+
+            InetAddress ip = null;
+
+            try {
+                ip = InetAddress.getByAddress( addr );
+            } catch ( UnknownHostException e ) {
+                e.printStackTrace();
+            }
+
+            return new InetSocketAddress( ip, port );
         }
     }
 
@@ -508,8 +520,11 @@ public class PacketBuffer {
 
             this.writeUInt( complement );
             this.writeUShort( addr.getPort() );
-        } else {
-            throw new IllegalArgumentException( "IPv6 is not yet supported" );
+        } else if ( addr.getAddress() instanceof Inet6Address ) {
+            this.writeLShort( AF_INET6 );
+            this.writeShort( (short) addr.getPort() );
+            this.writeLong( 0 );
+            this.writeBytes( addr.getAddress().getAddress() );
         }
     }
 

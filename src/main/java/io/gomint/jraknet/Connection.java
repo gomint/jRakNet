@@ -28,6 +28,7 @@ public abstract class Connection {
     private static final Logger LOGGER = LoggerFactory.getLogger( Connection.class );
     public static final int DEFAULT_RESEND_TIMEOUT = 500;
     protected static final InetSocketAddress[] LOCAL_IP_ADDRESSES = new InetSocketAddress[]{ new InetSocketAddress( "127.0.0.1", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ) };
+    protected static final InetSocketAddress[] LOCAL_IP_ADDRESSES_V6 = new InetSocketAddress[]{ new InetSocketAddress( "::1", 0 ), new InetSocketAddress( "::/0", 0 ), new InetSocketAddress( "::/0", 0 ), new InetSocketAddress( "::/0", 0 ), new InetSocketAddress( "::/0", 0 ), new InetSocketAddress( "::/0", 0 ), new InetSocketAddress( "::/0", 0 ), new InetSocketAddress( "::/0", 0 ), new InetSocketAddress( "::/0", 0 ), new InetSocketAddress( "::/0", 0 ) };
 
     // Connection Metadata
     private final InetSocketAddress address;
