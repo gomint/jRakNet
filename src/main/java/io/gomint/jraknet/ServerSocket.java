@@ -150,7 +150,7 @@ public class ServerSocket extends Socket {
 	 *
 	 * @return The address the socket is bound to or null if it is not bound yet
 	 */
-	public SocketAddress getBindAddress() {
+	public InetSocketAddress getBindAddress() {
 		return this.bindAddress;
 	}
 

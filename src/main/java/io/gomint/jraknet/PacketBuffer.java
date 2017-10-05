@@ -4,9 +4,7 @@ import io.gomint.jraknet.datastructures.TriadRange;
 import io.netty.buffer.ByteBuf;
 
 import java.math.BigInteger;
-import java.net.Inet4Address;
-import java.net.InetSocketAddress;
-import java.net.SocketAddress;
+import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.UUID;
@@ -18,6 +16,7 @@ import java.util.UUID;
 public class PacketBuffer {
 
     private static final BigInteger UNSIGNED_LONG_MAX_VALUE = new BigInteger( "FFFFFFFFFFFFFFFF", 16 );
+    private static final short AF_INET6 = (short) ( System.getProperty( "os.name" ).equals( "windows" ) ? 23 : 10 );
 
     private byte[] buffer;
     private int offset;
@@ -170,9 +169,18 @@ public class PacketBuffer {
 
             return InetSocketAddress.createUnresolved( hostname, port );
         } else {
-            // Currently IPv6 is not supported!
-            this.skip( 24 );
-            return null;
+            // Reading sockaddr_in6 structure whose fields are _always_ in big-endian order!
+            this.readUShort(); // Addressinfo
+            int port = this.readUShort();
+            this.readUInt(); // Flowinfo (see RFC 6437 - can safely leave it at 0)
+            byte[] in6addr = new byte[16];
+            this.readBytes( in6addr );
+    
+            try {
+                return new InetSocketAddress( Inet6Address.getByAddress( null, in6addr, 0 ), port );
+            } catch ( UnknownHostException e ) {
+                throw new IllegalArgumentException( "Could not read sockaddr_in6", e );
+            }
         }
     }
 
@@ -508,8 +516,15 @@ public class PacketBuffer {
 
             this.writeUInt( complement );
             this.writeUShort( addr.getPort() );
-        } else {
-            throw new IllegalArgumentException( "IPv6 is not yet supported" );
+        } else if ( addr.getAddress() instanceof Inet6Address ) {
+            Inet6Address in6addr = (Inet6Address) addr.getAddress();
+            
+            this.ensureCapacity( 25  );
+            this.writeByte( (byte) 6 );
+            this.writeUShort( AF_INET6 );
+            this.writeUShort( (short) addr.getPort() );
+            this.writeUInt( 0L );
+            this.writeBytes( in6addr.getAddress() );
         }
     }
 

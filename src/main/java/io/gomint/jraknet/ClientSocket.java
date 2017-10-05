@@ -314,7 +314,7 @@ public class ClientSocket extends Socket {
      * @param connection The connection that successfully established a connection
      */
     void propagateConnectionRequestSucceded( ClientConnection connection ) {
-        this.propagateEvent( new SocketEvent( SocketEvent.Type.CONNECTION_ATTEMPT_SUCCEEDED ) );
+        this.propagateEvent( new SocketEvent( SocketEvent.Type.CONNECTION_ATTEMPT_SUCCEEDED, connection ) );
     }
 
     /**

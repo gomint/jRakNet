@@ -43,7 +43,8 @@ public class SocketEvent {
 		CONNECTION_ATTEMPT_FAILED,
 
 		/**
-		 * Notifies that a client connection's connection attempt succeeded.
+		 * Notifies that a client connection's connection attempt succeeded. Events of this type are guaranteed
+		 * to possess a connection parameter.
 		 */
 		CONNECTION_ATTEMPT_SUCCEEDED,
 
@@ -136,7 +137,8 @@ public class SocketEvent {
 	public Connection getConnection() {
 		if ( this.type == Type.NEW_INCOMING_CONNECTION ||
 		     this.type == Type.CONNECTION_CLOSED ||
-		     this.type == Type.CONNECTION_DISCONNECTED ) {
+		     this.type == Type.CONNECTION_DISCONNECTED ||
+			 this.type == Type.CONNECTION_ATTEMPT_SUCCEEDED ) {
 			return (Connection) this.data;
 		}
 		return null;

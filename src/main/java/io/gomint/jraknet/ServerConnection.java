@@ -3,6 +3,8 @@ package io.gomint.jraknet;
 import org.slf4j.Logger;
 
 import java.io.IOException;
+import java.net.Inet4Address;
+import java.net.Inet6Address;
 import java.net.InetSocketAddress;
 
 import static io.gomint.jraknet.RakNetConstraints.*;
@@ -150,7 +152,7 @@ class ServerConnection extends Connection {
 			return;
 		}
 
-		datagram.skip( 1 );                                                                       // Packet ID
+		datagram.skip( 1 );                                                                // Packet ID
 		datagram.readOfflineMessageDataId();                                                      // Offline Message Data ID
 		@SuppressWarnings( "unused" ) InetSocketAddress bindAddress = datagram.readAddress();     // Address the client bound to
 		this.setMtuSize( datagram.readUShort() );                                                 // MTU
@@ -294,13 +296,30 @@ class ServerConnection extends Connection {
 	}
 
 	private void sendConnectionRequestAccepted( long timestamp ) {
-		PacketBuffer buffer = new PacketBuffer( 94 );
+		PacketBuffer buffer;
+		boolean ipv6;
+		if ( this.getAddress().getAddress() instanceof Inet6Address ) {
+			buffer = new PacketBuffer( 294 );
+			ipv6 = true;
+		} else if ( this.getAddress().getAddress() instanceof Inet4Address ) {
+			buffer = new PacketBuffer( 94 );
+			ipv6 = false;
+		} else {
+			// WTF is this IP version?
+			return;
+		}
+
 		buffer.writeByte( CONNECTION_REQUEST_ACCEPTED );            // Packet ID
 		buffer.writeAddress( this.getAddress() );                   // Remote system address
 		buffer.writeShort( (short) 0 );                             // Remote system index (not applicable)
 		for ( int i = 0; i < MAX_LOCAL_IPS; ++i ) {                 // Local IP Addresses
-			buffer.writeAddress( LOCAL_IP_ADDRESSES[i] );
+			if ( ipv6 ) {
+				buffer.writeAddress( LOCAL_IP_ADDRESSES_V6[i] );
+			} else {
+				buffer.writeAddress( LOCAL_IP_ADDRESSES[i] );
+			}
 		}
+
 		buffer.writeLong( timestamp );                              // Timestamp (used for latency detection)
 		buffer.writeLong( System.currentTimeMillis() );             // Current Time (used for latency detection)
 
