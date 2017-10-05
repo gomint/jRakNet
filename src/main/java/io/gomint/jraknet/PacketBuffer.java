@@ -175,6 +175,7 @@ public class PacketBuffer {
             this.readUInt(); // Flowinfo (see RFC 6437 - can safely leave it at 0)
             byte[] in6addr = new byte[16];
             this.readBytes( in6addr );
+            this.readUInt(); // Scope ID
     
             try {
                 return new InetSocketAddress( Inet6Address.getByAddress( null, in6addr, 0 ), port );
@@ -525,6 +526,7 @@ public class PacketBuffer {
             this.writeUShort( (short) addr.getPort() );
             this.writeUInt( 0L );
             this.writeBytes( in6addr.getAddress() );
+            this.writeUInt( 0L );
         }
     }
 
