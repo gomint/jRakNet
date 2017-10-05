@@ -152,7 +152,7 @@ class ServerConnection extends Connection {
 			return;
 		}
 
-		datagram.skip( 1 );                                                                // Packet ID
+		datagram.skip( 1 );                                                                       // Packet ID
 		datagram.readOfflineMessageDataId();                                                      // Offline Message Data ID
 		@SuppressWarnings( "unused" ) InetSocketAddress bindAddress = datagram.readAddress();     // Address the client bound to
 		this.setMtuSize( datagram.readUShort() );                                                 // MTU
