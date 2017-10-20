@@ -12,5 +12,10 @@ pipeline {
         sh 'mvn -B clean install'
       }
     }
+    stage('Store') {
+      steps {
+        archiveArtifacts 'target/jraknet-*.jar'
+      }
+    }
   }
 }
