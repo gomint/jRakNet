@@ -18,10 +18,7 @@ import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static io.gomint.jraknet.RakNetConstraints.*;
@@ -448,4 +445,23 @@ public class ServerSocket extends Socket {
 		return connection;
 	}
 
+	@Override
+	public boolean equals(Object o) {
+		if (this == o) return true;
+		if (o == null || getClass() != o.getClass()) return false;
+		if (!super.equals(o)) return false;
+		ServerSocket that = (ServerSocket) o;
+		return maxConnections == that.maxConnections &&
+				mojangModificationEnabled == that.mojangModificationEnabled &&
+				Objects.equals(logger, that.logger) &&
+				Objects.equals(bindAddress, that.bindAddress) &&
+				Objects.equals(connectionsByAddress, that.connectionsByAddress) &&
+				Objects.equals(connectionsByGuid, that.connectionsByGuid) &&
+				Objects.equals(activeConnections, that.activeConnections);
+	}
+
+	@Override
+	public int hashCode() {
+		return Objects.hash(super.hashCode(), logger, bindAddress, maxConnections, connectionsByAddress, connectionsByGuid, activeConnections, mojangModificationEnabled);
+	}
 }
