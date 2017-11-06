@@ -18,6 +18,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
+import java.util.Objects;
 
 import static io.gomint.jraknet.RakNetConstraints.*;
 
@@ -373,4 +374,19 @@ public class ClientSocket extends Socket {
         this.propagateEvent( new SocketEvent( SocketEvent.Type.UNCONNECTED_PONG, info ) );
     }
 
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        if (!super.equals(o)) return false;
+        ClientSocket that = (ClientSocket) o;
+        return mojangModificationEnabled == that.mojangModificationEnabled &&
+                Objects.equals(logger, that.logger) &&
+                Objects.equals(connection, that.connection);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(super.hashCode(), logger, connection, mojangModificationEnabled);
+    }
 }

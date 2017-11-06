@@ -13,6 +13,7 @@ import java.nio.channels.DatagramChannel;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.util.Arrays;
+import java.util.Objects;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ThreadFactory;
@@ -260,4 +261,16 @@ public abstract class Socket implements AutoCloseable {
         this.cleanupUpdateThread();
     }
 
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Socket socket = (Socket) o;
+        return guid == socket.guid;
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(guid);
+    }
 }
