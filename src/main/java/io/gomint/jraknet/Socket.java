@@ -266,17 +266,11 @@ public abstract class Socket implements AutoCloseable {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         Socket socket = (Socket) o;
-        return guid == socket.guid &&
-                Objects.equals(udpSocket, socket.udpSocket) &&
-                Objects.equals(channel, socket.channel) &&
-                Objects.equals(eventLoopFactory, socket.eventLoopFactory) &&
-                Objects.equals(updateThread, socket.updateThread) &&
-                Objects.equals(running, socket.running) &&
-                Objects.equals(eventHandler, socket.eventHandler);
+        return guid == socket.guid;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(udpSocket, channel, eventLoopFactory, updateThread, running, eventHandler, guid);
+        return Objects.hash(guid);
     }
 }

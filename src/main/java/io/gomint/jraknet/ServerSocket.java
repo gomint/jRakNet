@@ -453,15 +453,11 @@ public class ServerSocket extends Socket {
 		ServerSocket that = (ServerSocket) o;
 		return maxConnections == that.maxConnections &&
 				mojangModificationEnabled == that.mojangModificationEnabled &&
-				Objects.equals(logger, that.logger) &&
-				Objects.equals(bindAddress, that.bindAddress) &&
-				Objects.equals(connectionsByAddress, that.connectionsByAddress) &&
-				Objects.equals(connectionsByGuid, that.connectionsByGuid) &&
-				Objects.equals(activeConnections, that.activeConnections);
+				Objects.equals(bindAddress, that.bindAddress);
 	}
 
 	@Override
 	public int hashCode() {
-		return Objects.hash(super.hashCode(), logger, bindAddress, maxConnections, connectionsByAddress, connectionsByGuid, activeConnections, mojangModificationEnabled);
+		return Objects.hash(super.hashCode(), bindAddress, maxConnections, mojangModificationEnabled);
 	}
 }
