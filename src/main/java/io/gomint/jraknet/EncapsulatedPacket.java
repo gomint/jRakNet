@@ -15,7 +15,7 @@ import static io.gomint.jraknet.RakNetConstraints.NUM_ORDERING_CHANNELS;
 // @Deprecated
 public class EncapsulatedPacket {
 
-    private static final Logger logger = LoggerFactory.getLogger( EncapsulatedPacket.class );
+    private static final Logger LOGGER = LoggerFactory.getLogger( EncapsulatedPacket.class );
 
     private PacketReliability reliability = null;
     private int reliableMessageNumber = -1;
@@ -62,7 +62,7 @@ public class EncapsulatedPacket {
         byte flags = buffer.readByte();
         this.reliability = PacketReliability.getFromId( (byte) ( ( flags & 0xE0 ) >>> 5 ) );
         boolean isSplitPacket = ( flags & 0b00010000 ) > 0;
-        int packetLength = (int) Math.ceil( buffer.readUShort() / 8 );
+        int packetLength = (int) Math.ceil( buffer.readUShort() / (double) 8 );
 
         this.reliableMessageNumber = -1;
         this.sequencingIndex = -1;

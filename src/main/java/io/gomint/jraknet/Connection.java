@@ -1,8 +1,6 @@
 package io.gomint.jraknet;
 
 import io.gomint.jraknet.datastructures.*;
-import io.netty.buffer.ByteBuf;
-import io.netty.channel.Channel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -10,11 +8,13 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.*;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Function;
 
 import static io.gomint.jraknet.RakNetConstraints.*;
 
@@ -82,6 +82,9 @@ public abstract class Connection {
     protected long lastPingTime;
     protected long lastPongTime;
 
+    // Data processors
+    private List<Function<EncapsulatedPacket, EncapsulatedPacket>> dataProcessors = new CopyOnWriteArrayList<>();
+
     // ================================ CONSTRUCTORS ================================ //
 
     Connection( InetSocketAddress address, ConnectionState initialState ) {
@@ -91,6 +94,27 @@ public abstract class Connection {
     }
 
     // ================================ PUBLIC API ================================ //
+
+    /**
+     * Add a new data processor. Data Processors are called on the netty threads. This can be used to apply further
+     * custom data manipulation (like gzip compression, aes encryption etc.)
+     * <p>
+     * The function gets the previous encapsulated Packet and should return the modified version.
+     *
+     * @param dataProcessor which should be attached to this connection
+     */
+    public void addDataProcessor( Function<EncapsulatedPacket, EncapsulatedPacket> dataProcessor ) {
+        this.dataProcessors.add( dataProcessor );
+    }
+
+    /**
+     * Remove a data processor.
+     *
+     * @param dataProcessor which should be removed
+     */
+    public void removeDataProcessor( Function<EncapsulatedPacket, EncapsulatedPacket> dataProcessor ) {
+        this.dataProcessors.remove( dataProcessor );
+    }
 
     /**
      * Get the ping of the underlying connection. This is done by sending ping packets every 2 seconds. So this
@@ -561,7 +585,7 @@ public abstract class Connection {
             PacketBuffer buffer = new PacketBuffer( this.mtuSize );
 
             // Write datagram header:
-            byte flags = (byte) ( 0x80 | ( sendList.size() > 0 ? 0x8 : 0x0 ) );     // IsValid | (isContinuousSend)
+            byte flags = (byte) ( 0x80 | ( !sendList.isEmpty() ? 0x8 : 0x0 ) );     // IsValid | (isContinuousSend)
             buffer.writeByte( flags );
 
             int nextDiaNumber = this.nextDatagramSequenceNumber.getAndIncrement();
@@ -620,6 +644,8 @@ public abstract class Connection {
                 packet.setNextExecution( time + DEFAULT_RESEND_TIMEOUT );
                 packet.incrementSendCount();
 
+                LOGGER.debug( "Resending packet due to client not acking it" );
+
                 // Insert back into resend queue:
                 this.resendQueue.add( packet );
             } else {
@@ -658,7 +684,7 @@ public abstract class Connection {
             PacketBuffer buffer = new PacketBuffer( this.mtuSize );
 
             // Write datagram header:
-            byte flags = (byte) ( 0x80 | ( sendList.size() > 0 ? 0x8 : 0x0 ) );     // IsValid | (isContinuousSend)
+            byte flags = (byte) ( 0x80 | ( !sendList.isEmpty() ? 0x8 : 0x0 ) );     // IsValid | (isContinuousSend)
             buffer.writeByte( flags );
 
             int nextDiaNumber = this.nextDatagramSequenceNumber.getAndIncrement();
@@ -714,13 +740,11 @@ public abstract class Connection {
 
         this.postUpdate( time );
 
-        if ( this.state == ConnectionState.DISCONNECTING ) {
-            if ( this.sendBuffer.size() == 0 ) {
-                // Check if we can perform a clean disconnect now:
-                this.state = ConnectionState.UNCONNECTED;
-                this.propagateConnectionDisconnected();
-                return false;
-            }
+        if ( this.state == ConnectionState.DISCONNECTING && this.sendBuffer.isEmpty() ) {
+            // Check if we can perform a clean disconnect now:
+            this.state = ConnectionState.UNCONNECTED;
+            this.propagateConnectionDisconnected();
+            return false;
         }
 
         return true;
@@ -855,7 +879,7 @@ public abstract class Connection {
         // Fast out in sending when there is nothing to do
         this.sendingACKsLock.lock();
         try {
-            if ( this.outgoingACKs.size() == 0 ) return;
+            if ( this.outgoingACKs.isEmpty() ) return;
         } finally {
             this.sendingACKsLock.unlock();
         }
@@ -869,7 +893,7 @@ public abstract class Connection {
 
         this.sendingACKsLock.lock();
         try {
-            if ( this.outgoingACKs.size() > 0 ) {
+            if ( !this.outgoingACKs.isEmpty() ) {
                 // Serialize ACKs into buffer and remove them afterwards:
                 int count = buffer.writeTriadRangeList( this.outgoingACKs, 0, this.outgoingACKs.size(), maxSize );
                 for ( int i = 0; i < count; i++ ) {
@@ -1161,11 +1185,21 @@ public abstract class Connection {
                 this.handleDisconnectionNotification( packet );
                 break;
             default:
-                if ( !this.handlePacket0( packet ) ) {
-                    if ( packetId > USER_PACKET_ENUM ) {
-                        this.receiveBuffer.offer( packet );
+                if ( !this.handlePacket0( packet ) && packetId > USER_PACKET_ENUM ) {
+                    // Pass this around in the data processors
+                    EncapsulatedPacket inputPacket = packet;
+                    for ( Function<EncapsulatedPacket, EncapsulatedPacket> processor : this.dataProcessors ) {
+                        inputPacket = processor.apply( inputPacket );
+                        if ( inputPacket == null ) {
+                            break;
+                        }
+                    }
+
+                    if ( inputPacket != null ) {
+                        this.receiveBuffer.offer( inputPacket );
                     }
                 }
+
                 break;
         }
     }
