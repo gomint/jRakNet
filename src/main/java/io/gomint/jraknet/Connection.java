@@ -26,7 +26,7 @@ import static io.gomint.jraknet.RakNetConstraints.*;
 public abstract class Connection {
 
     private static final Logger LOGGER = LoggerFactory.getLogger( Connection.class );
-    public static final int DEFAULT_RESEND_TIMEOUT = 500;
+    public static final int DEFAULT_RESEND_TIMEOUT = 8000;
     protected static final InetSocketAddress[] LOCAL_IP_ADDRESSES = new InetSocketAddress[]{ new InetSocketAddress( "127.0.0.1", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ) };
     protected static final InetSocketAddress[] LOCAL_IP_ADDRESSES_V6 = new InetSocketAddress[]{ new InetSocketAddress( "::1", 0 ), new InetSocketAddress( "::0", 0 ), new InetSocketAddress( "::0", 0 ), new InetSocketAddress( "::0", 0 ), new InetSocketAddress( "::0", 0 ), new InetSocketAddress( "::0", 0 ), new InetSocketAddress( "::0", 0 ), new InetSocketAddress( "::0", 0 ), new InetSocketAddress( "::0", 0 ), new InetSocketAddress( "::0", 0 ) };
 
@@ -586,6 +586,7 @@ public abstract class Connection {
 
             // Write datagram header:
             byte flags = (byte) ( 0x80 | ( !sendList.isEmpty() ? 0x8 : 0x0 ) );     // IsValid | (isContinuousSend)
+            flags |= 0x04;  // needsBandAS
             buffer.writeByte( flags );
 
             int nextDiaNumber = this.nextDatagramSequenceNumber.getAndIncrement();
@@ -629,9 +630,15 @@ public abstract class Connection {
         int currentDatagramSize = 0;
 
         // Resend everything scheduled for resend:
+        int limit = 16;
         while ( !this.resendQueue.isEmpty() ) {
             EncapsulatedPacket packet = this.resendQueue.peek();
             if ( packet.getNextExecution() <= time ) {
+                // Don't resend more than 16 packets in one tick
+                if ( --limit <= 0 ) {
+                    break;
+                }
+
                 // Delete packets marked for removal:
                 if ( packet.getNextExecution() == 0L ) {
                     this.resendQueue.poll();
@@ -887,8 +894,8 @@ public abstract class Connection {
         int maxSize = this.mtuSize - DATA_HEADER_BYTE_LENGTH;
         PacketBuffer buffer = new PacketBuffer( this.mtuSize );
 
-        // IsValid | IsACK
-        byte flags = (byte) 0x80 | (byte) 0x40;
+        // IsValid | IsACK | needsBandAS
+        byte flags = (byte) 0x80 | (byte) 0x40 | (byte) 0x04;
         buffer.writeByte( flags );
 
         this.sendingACKsLock.lock();
@@ -926,8 +933,8 @@ public abstract class Connection {
         int maxSize = this.mtuSize - DATA_HEADER_BYTE_LENGTH;
         PacketBuffer buffer = new PacketBuffer( this.mtuSize );
 
-        // IsValid | IsNAK
-        byte flags = (byte) 0x80 | (byte) 0x20;
+        // IsValid | IsNAK | needBandAS
+        byte flags = (byte) 0x80 | (byte) 0x20 | (byte) 0x04;
         buffer.writeByte( flags );
 
         this.sendingNAKsLock.lock();

@@ -1,26 +1,14 @@
 package io.gomint.jraknet;
 
 import io.netty.bootstrap.Bootstrap;
-import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
-import io.netty.channel.socket.DatagramPacket;
 import org.slf4j.Logger;
 
-import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.nio.ByteBuffer;
-import java.nio.channels.DatagramChannel;
-import java.nio.channels.SelectionKey;
-import java.nio.channels.Selector;
-import java.util.Arrays;
-import java.util.Random;
-import java.util.Set;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-
-import static io.gomint.jraknet.RakNetConstraints.MAXIMUM_MTU_SIZE;
 
 /**
  * @author BlackyPaw
@@ -248,9 +236,9 @@ public abstract class Socket implements AutoCloseable {
             this.updateConnections( start );
 
             long time = System.currentTimeMillis() - start;
-            if ( time < 10 ) {
+            if ( time < 50 ) {
                 try {
-                    Thread.sleep( 10 - time );
+                    Thread.sleep( 50 - time );
                 } catch ( InterruptedException e ) {
                     e.printStackTrace();
                 }

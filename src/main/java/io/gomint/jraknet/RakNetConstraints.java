@@ -21,10 +21,7 @@ public class RakNetConstraints {
 	public static final int MINIMUM_MTU_SIZE = 400;
 
 	// Internal constant used by RakNet (may be seen here: https://github.com/OculusVR/RakNet/blob/master/Source/MTUSize.h)
-	public static final int MAXIMUM_MTU_SIZE = 1492;
-
-	// The size of any UDP datagram's header
-	public static final int UDP_DATAGRAM_HEADER_SIZE = 18;
+	public static final int MAXIMUM_MTU_SIZE = 1464;
 
 	// Byte Signature used to identify unconnected data packets for yet unconnected connections (may be seen here: https://github.com/OculusVR/RakNet/blob/master/Source/RakPeer.cpp#L135)
 	public static final byte[] OFFLINE_MESSAGE_DATA_ID = new byte[] { (byte) 0x00, (byte) 0xFF, (byte) 0xFF, (byte) 0x00, (byte) 0xFE, (byte) 0xFE, (byte) 0xFE, (byte) 0xFE, (byte) 0xFD, (byte) 0xFD, (byte) 0xFD, (byte) 0xFD, (byte) 0x12, (byte) 0x34, (byte) 0x56, (byte) 0x78 };
@@ -33,9 +30,9 @@ public class RakNetConstraints {
 	public static final long CONNECTION_TIMEOUT_MILLIS = 10000L;
 
 	// The maximum length of any encapsulated datagram's header
-	public static final int DATA_HEADER_BYTE_LENGTH = 9;
+	public static final int DATA_HEADER_BYTE_LENGTH = 36;
 
-	public static final int MAX_MESSAGE_HEADER_BYTE_LENGTH = 23;
+	public static final int MAX_MESSAGE_HEADER_BYTE_LENGTH = 24;
 
 	// The maximum number of local IPs sent to a remote system
 	public static final int MAX_LOCAL_IPS = 10;
