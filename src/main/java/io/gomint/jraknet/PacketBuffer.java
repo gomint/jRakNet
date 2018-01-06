@@ -139,7 +139,7 @@ public class PacketBuffer {
     public String readString() {
         int length = this.readUnsignedVarInt();
         this.ensureRemaining( length );
-        String value = new String( this.buffer, this.position, length );
+        String value = new String( this.buffer, this.position, length, StandardCharsets.UTF_8 );
         this.position += length;
         return value;
     }
