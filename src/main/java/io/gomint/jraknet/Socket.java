@@ -175,25 +175,12 @@ public abstract class Socket implements AutoCloseable {
      * connections.
      */
     private void startUpdateThread() {
-        final long[] start = new long[1];
-
         this.channel.eventLoop().scheduleAtFixedRate( new Runnable() {
             @Override
             public void run() {
                 try {
-                    start[0] = System.currentTimeMillis();
-
                     // Update all connections:
-                    updateConnections( start[0] );
-
-                    long time = System.currentTimeMillis() - start[0];
-                    if ( time < 50 ) {
-                        try {
-                            Thread.sleep( 50 - time );
-                        } catch ( InterruptedException e ) {
-                            e.printStackTrace();
-                        }
-                    }
+                    updateConnections( System.currentTimeMillis() );
                 } catch ( Throwable t ) {
                     t.printStackTrace();
                 }
