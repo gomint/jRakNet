@@ -111,7 +111,7 @@ public class ServerSocket extends Socket {
 
 		// Automatically binds socket to address (no further #bind() call required)
 		this.udpSocket = new Bootstrap();
-		this.udpSocket.group( Epoll.isAvailable() ? new EpollEventLoopGroup() : new NioEventLoopGroup() );
+		this.udpSocket.group( EventLoops.LOOP_GROUP );
 		this.udpSocket.channel( Epoll.isAvailable() ? EpollDatagramChannel.class : NioDatagramChannel.class );
 		this.udpSocket.handler( new ChannelInboundHandlerAdapter() {
 			@Override

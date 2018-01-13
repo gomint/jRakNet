@@ -5,10 +5,10 @@ import io.netty.channel.Channel;
 import org.slf4j.Logger;
 
 import java.net.InetSocketAddress;
-import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * @author BlackyPaw
@@ -21,8 +21,7 @@ public abstract class Socket implements AutoCloseable {
     protected Channel channel;
 
     // Threads used for modeling network "events"
-    private ThreadFactory eventLoopFactory;
-    private Thread updateThread;
+    private ScheduledFuture<Void> updateFuture;
 
     // Lifecycle
     private AtomicBoolean running = new AtomicBoolean( false );
@@ -47,22 +46,6 @@ public abstract class Socket implements AutoCloseable {
      */
     public boolean isInitialized() {
         return ( this.udpSocket != null );
-    }
-
-    /**
-     * Sets the event loop factory to be used for internal threads.
-     * <p>
-     * Must be set before the socket is somehow initialized otherwise the call will result in an
-     * IllegalStateException.
-     *
-     * @param factory The factory to be used to create internal threads
-     */
-    public void setEventLoopFactory( ThreadFactory factory ) {
-        if ( this.udpSocket != null ) {
-            throw new IllegalStateException( "Cannot set event loop factory if socket was already initialized" );
-        }
-
-        this.eventLoopFactory = factory;
     }
 
     /**
@@ -95,17 +78,14 @@ public abstract class Socket implements AutoCloseable {
         // Stop all threads safely:
         this.running.set( false );
 
-        try {
-            this.updateThread.join();
-        } catch ( InterruptedException ignored ) {
-            // ._.
-        } finally {
-            this.updateThread = null;
+        // Cancel the updater
+        if ( this.updateFuture != null ) {
+            this.updateFuture.cancel( true );
+            this.updateFuture = null;
         }
 
         // Close the UDP socket:
-        this.channel.close().syncUninterruptibly();
-        this.channel.eventLoop().shutdownGracefully().syncUninterruptibly();
+        this.channel.close();
         this.channel = null;
         this.udpSocket = null;
     }
@@ -123,7 +103,7 @@ public abstract class Socket implements AutoCloseable {
      * Invoked right after a datagram was received. This method may perform very rudimentary
      * datagram handling if necessary.
      *
-     * @param sender  The channel which sent this datagram
+     * @param sender   The channel which sent this datagram
      * @param datagram The datagram that was just received
      * @return Whether or not the datagram was handled by this method already and should be processed no further
      */
@@ -135,7 +115,7 @@ public abstract class Socket implements AutoCloseable {
      * Handles the given datagram. This will be invoked on the socket's update thread and should hand
      * this datagram to the connection it belongs to in order to deserialize it appropriately.
      *
-     * @param sender  The channel which this datagram sent
+     * @param sender   The channel which this datagram sent
      * @param datagram The datagram to be handled
      * @param time     The current system time
      */
@@ -176,7 +156,6 @@ public abstract class Socket implements AutoCloseable {
         // Initialize other subsystems; won't get here if bind fails as DatagramSocket's
         // constructor will throw SocketException:
         this.running.set( true );
-        this.initializeEventLoopFactory();
         this.startUpdateThread();
     }
 
@@ -192,60 +171,34 @@ public abstract class Socket implements AutoCloseable {
     }
 
     /**
-     * Initializes the socket's event loop factory if it does not yet have one set.
-     */
-    private void initializeEventLoopFactory() {
-        if ( this.eventLoopFactory != null ) {
-            return;
-        }
-
-        // Construct default event loop factory:
-        this.eventLoopFactory = new ThreadFactory() {
-            private ThreadGroup group = new ThreadGroup( "jRakNet-ServerSocket" );
-            private AtomicInteger id = new AtomicInteger( 0 );
-
-            public Thread newThread( Runnable r ) {
-                return new Thread( this.group, r, "EventLoop-" + Integer.toString( id.incrementAndGet() ) );
-            }
-        };
-    }
-
-    /**
      * Starts the thread that will continuously update all currently connected player's
      * connections.
      */
     private void startUpdateThread() {
-        this.updateThread = this.eventLoopFactory.newThread( new Runnable() {
+        final long[] start = new long[1];
+
+        this.channel.eventLoop().scheduleAtFixedRate( new Runnable() {
             @Override
             public void run() {
-                Thread.currentThread().setName( Thread.currentThread().getName() + " [jRaknet " + Socket.this.getClass().getSimpleName() + " Update]" );
-                Socket.this.update();
-            }
-        } );
-
-        this.updateThread.start();
-    }
-
-    private void update() {
-        long start;
-
-        while ( this.running.get() ) {
-            start = System.currentTimeMillis();
-
-            // Update all connections:
-            this.updateConnections( start );
-
-            long time = System.currentTimeMillis() - start;
-            if ( time < 50 ) {
                 try {
-                    Thread.sleep( 50 - time );
-                } catch ( InterruptedException e ) {
-                    e.printStackTrace();
+                    start[0] = System.currentTimeMillis();
+
+                    // Update all connections:
+                    updateConnections( start[0] );
+
+                    long time = System.currentTimeMillis() - start[0];
+                    if ( time < 50 ) {
+                        try {
+                            Thread.sleep( 50 - time );
+                        } catch ( InterruptedException e ) {
+                            e.printStackTrace();
+                        }
+                    }
+                } catch ( Throwable t ) {
+                    t.printStackTrace();
                 }
             }
-        }
-
-        this.cleanupUpdateThread();
+        }, 0, 50, TimeUnit.MILLISECONDS );
     }
 
 }

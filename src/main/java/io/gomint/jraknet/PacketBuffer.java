@@ -176,7 +176,7 @@ public class PacketBuffer {
             byte[] in6addr = new byte[16];
             this.readBytes( in6addr );
             this.readUInt(); // Scope ID
-    
+
             try {
                 return new InetSocketAddress( Inet6Address.getByAddress( null, in6addr, 0 ), port );
             } catch ( UnknownHostException e ) {
@@ -203,20 +203,19 @@ public class PacketBuffer {
     }
 
     public int readUnsignedVarInt() {
-        int out = 0;
-        int bytes = 0;
-        byte in;
+        int value = 0;
+        int i = 0;
+        int b;
 
-        do {
-            in = this.readByte();
-            out |= ( in & 0x7F ) << ( bytes++ * 7 );
-
-            if ( bytes > 6 ) {
+        while ( ( ( b = this.readByte() ) & 0x80 ) != 0 ) {
+            value |= ( b & 0x7F ) << i;
+            i += 7;
+            if ( i > 35 ) {
                 throw new RuntimeException( "VarInt too big" );
             }
-        } while ( ( in & 0x80 ) == 0x80 );
+        }
 
-        return out;
+        return value | ( b << i );
     }
 
     public int readSignedVarInt() {
@@ -225,20 +224,19 @@ public class PacketBuffer {
     }
 
     public long readUnsignedVarLong() {
-        long out = 0;
-        int bytes = 0;
-        byte in;
+        long value = 0;
+        int i = 0;
+        long b;
 
-        do {
-            in = this.readByte();
-            out |= ( in & 0x7F ) << ( bytes++ * 7 );
-
-            if ( bytes > 10 ) {
-                throw new RuntimeException( "VarInt too big" );
+        while ( ( ( b = this.readByte() ) & 0x80 ) != 0 ) {
+            value |= ( b & 0x7F ) << i;
+            i += 7;
+            if ( i > 63 ) {
+                throw new RuntimeException( "VerLong too big" );
             }
-        } while ( ( in & 0x80 ) == 0x80 );
+        }
 
-        return out;
+        return value | ( b << i );
     }
 
     public BigInteger readSignedVarLong() {
@@ -519,8 +517,8 @@ public class PacketBuffer {
             this.writeUShort( addr.getPort() );
         } else if ( addr.getAddress() instanceof Inet6Address ) {
             Inet6Address in6addr = (Inet6Address) addr.getAddress();
-            
-            this.ensureCapacity( 25  );
+
+            this.ensureCapacity( 25 );
             this.writeByte( (byte) 6 );
             this.writeUShort( AF_INET6 );
             this.writeUShort( (short) addr.getPort() );
