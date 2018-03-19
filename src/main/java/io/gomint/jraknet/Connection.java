@@ -634,15 +634,15 @@ public abstract class Connection {
         while ( !this.resendQueue.isEmpty() ) {
             EncapsulatedPacket packet = this.resendQueue.peek();
             if ( packet.getNextExecution() <= time ) {
-                // Don't resend more than 16 packets in one tick
-                if ( --limit <= 0 ) {
-                    break;
-                }
-
                 // Delete packets marked for removal:
                 if ( packet.getNextExecution() == 0L ) {
                     this.resendQueue.poll();
                     continue;
+                }
+
+                // Don't resend more than 16 packets in one tick
+                if ( --limit <= 0 ) {
+                    break;
                 }
 
                 currentDatagramSize = this.pushPacket( sendList, packet, currentDatagramSize );
@@ -692,6 +692,7 @@ public abstract class Connection {
 
             // Write datagram header:
             byte flags = (byte) ( 0x80 | ( !sendList.isEmpty() ? 0x8 : 0x0 ) );     // IsValid | (isContinuousSend)
+            flags |= 0x04; // needsBandAs
             buffer.writeByte( flags );
 
             int nextDiaNumber = this.nextDatagramSequenceNumber.getAndIncrement();
