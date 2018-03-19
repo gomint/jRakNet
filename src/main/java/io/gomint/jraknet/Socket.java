@@ -182,10 +182,10 @@ public abstract class Socket implements AutoCloseable {
                     // Update all connections:
                     updateConnections( System.currentTimeMillis() );
                 } catch ( Throwable t ) {
-                    t.printStackTrace();
+                    Socket.this.getImplementationLogger().error( "Exception in updating connections", t );
                 }
             }
-        }, 0, 50, TimeUnit.MILLISECONDS );
+        }, 0, 10, TimeUnit.MILLISECONDS );
     }
 
 }
