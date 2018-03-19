@@ -283,4 +283,8 @@ public class EncapsulatedPacket {
         this.resendCount++;
     }
 
+    public int getSendCount() {
+        return this.resendCount;
+    }
+
 }

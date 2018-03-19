@@ -539,9 +539,9 @@ public abstract class Connection {
         this.outgoingACKs = new ArrayList<>( 128 );
         this.outgoingNAKs = new ArrayList<>( 128 );
         this.sendBuffer = new LinkedBlockingQueue<>();
-        this.resendBuffer = new FixedSizeRRBuffer<>( 256 );
+        this.resendBuffer = new FixedSizeRRBuffer<>( 512 );
         this.resendQueue = new LinkedBlockingQueue<>();
-        this.datagramContentBuffer = new FixedSizeRRBuffer<>( 256 );
+        this.datagramContentBuffer = new FixedSizeRRBuffer<>( 512 );
     }
 
     /**
@@ -586,7 +586,6 @@ public abstract class Connection {
 
             // Write datagram header:
             byte flags = (byte) ( 0x80 | ( !sendList.isEmpty() ? 0x8 : 0x0 ) );     // IsValid | (isContinuousSend)
-            flags |= 0x04;  // needsBandAS
             buffer.writeByte( flags );
 
             int nextDiaNumber = this.nextDatagramSequenceNumber.getAndIncrement();
@@ -634,8 +633,8 @@ public abstract class Connection {
         while ( !this.resendQueue.isEmpty() ) {
             EncapsulatedPacket packet = this.resendQueue.peek();
             if ( packet.getNextExecution() <= time ) {
-                // Delete packets marked for removal:
-                if ( packet.getNextExecution() == 0L ) {
+                // Delete packets marked for removal or which are lost now (has been resend 10 times):
+                if ( packet.getNextExecution() == 0L || packet.getSendCount() > 9 ) {
                     this.resendQueue.poll();
                     continue;
                 }
@@ -648,7 +647,7 @@ public abstract class Connection {
                 currentDatagramSize = this.pushPacket( sendList, packet, currentDatagramSize );
 
                 this.resendQueue.poll();
-                packet.setNextExecution( time + DEFAULT_RESEND_TIMEOUT );
+                packet.setNextExecution( time + getResendTime( packet ) ); // Default Raknet uses a scaling from 100ms to 10 seconds for this
                 packet.incrementSendCount();
 
                 LOGGER.debug( "Resending packet due to client not acking it" );
@@ -692,7 +691,7 @@ public abstract class Connection {
 
             // Write datagram header:
             byte flags = (byte) ( 0x80 | ( !sendList.isEmpty() ? 0x8 : 0x0 ) );     // IsValid | (isContinuousSend)
-            flags |= 0x04; // needsBandAs
+
             buffer.writeByte( flags );
 
             int nextDiaNumber = this.nextDatagramSequenceNumber.getAndIncrement();
@@ -722,6 +721,14 @@ public abstract class Connection {
                 this.getImplementationLogger().error( "Failed to send datagram to destination", e );
             }
         }
+    }
+
+    private long getResendTime( EncapsulatedPacket packet ) {
+        int max = 10000;
+        int min = 100;
+
+        int should = ( packet.getSendCount() + 1 ) * min;
+        return Math.min( should, max );
     }
 
     /**
