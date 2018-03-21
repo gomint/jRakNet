@@ -30,9 +30,9 @@ public class RakNetConstraints {
 	public static final long CONNECTION_TIMEOUT_MILLIS = 10000L;
 
 	// The maximum length of any encapsulated datagram's header
-	public static final int DATA_HEADER_BYTE_LENGTH = 36;
+	public static final int DATA_HEADER_BYTE_LENGTH = 28;
 
-	public static final int MAX_MESSAGE_HEADER_BYTE_LENGTH = 24;
+	public static final int MAX_MESSAGE_HEADER_BYTE_LENGTH = 23;
 
 	// The maximum number of local IPs sent to a remote system
 	public static final int MAX_LOCAL_IPS = 10;

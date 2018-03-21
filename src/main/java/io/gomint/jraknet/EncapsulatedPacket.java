@@ -123,31 +123,31 @@ public class EncapsulatedPacket {
             flags |= 0x10;
         }
 
-        buffer.writeByte( flags );
-        buffer.writeUShort( this.getPacketLength() << 3 );
+        buffer.writeByte( flags ); // 1
+        buffer.writeUShort( this.getPacketLength() << 3 ); // 2 | 3
 
         if ( reliability == PacketReliability.RELIABLE ||
                 reliability == PacketReliability.RELIABLE_SEQUENCED ||
                 reliability == PacketReliability.RELIABLE_ORDERED ) {
-            buffer.writeTriad( this.reliableMessageNumber );
+            buffer.writeTriad( this.reliableMessageNumber ); // 3 | 6
         }
 
         if ( reliability == PacketReliability.UNRELIABLE_SEQUENCED || reliability == PacketReliability.RELIABLE_SEQUENCED ) {
-            buffer.writeTriad( this.sequencingIndex );
+            buffer.writeTriad( this.sequencingIndex ); // 3 | 9
         }
 
         if ( reliability == PacketReliability.UNRELIABLE_SEQUENCED ||
                 reliability == PacketReliability.RELIABLE_SEQUENCED ||
                 reliability == PacketReliability.RELIABLE_ORDERED ||
                 reliability == PacketReliability.RELIABLE_ORDERED_WITH_ACK_RECEIPT ) {
-            buffer.writeTriad( this.orderingIndex );
-            buffer.writeByte( this.orderingChannel );
+            buffer.writeTriad( this.orderingIndex );    // 3 | 12
+            buffer.writeByte( this.orderingChannel );   // 1 | 13
         }
 
         if ( this.isSplitPacket() ) {
-            buffer.writeUInt( this.splitPacketCount );
-            buffer.writeUShort( this.splitPacketId );
-            buffer.writeUInt( this.splitPacketIndex );
+            buffer.writeUInt( this.splitPacketCount ); // 4 | 17
+            buffer.writeUShort( this.splitPacketId ); // 2 | 19
+            buffer.writeUInt( this.splitPacketIndex ); // 4 | 23
         }
 
         buffer.writeBytes( this.packetData );
