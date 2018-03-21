@@ -188,6 +188,7 @@ public class ServerSocket extends Socket {
 	protected boolean receiveDatagram( InetSocketAddress sender, PacketBuffer datagram ) {
 		// Handle unconnected pings:
 		byte packetId = datagram.getBuffer()[0];
+
 		if ( packetId == UNCONNECTED_PING ) {
 			this.handleUnconnectedPing( sender, datagram );
 			return true;

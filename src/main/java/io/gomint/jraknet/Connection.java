@@ -2,7 +2,6 @@ package io.gomint.jraknet;
 
 import io.gomint.jraknet.datastructures.*;
 import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -25,8 +24,6 @@ import static io.gomint.jraknet.RakNetConstraints.*;
  */
 public abstract class Connection {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger( Connection.class );
-    public static final int DEFAULT_RESEND_TIMEOUT = 8000;
     protected static final InetSocketAddress[] LOCAL_IP_ADDRESSES = new InetSocketAddress[]{ new InetSocketAddress( "127.0.0.1", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ) };
     protected static final InetSocketAddress[] LOCAL_IP_ADDRESSES_V6 = new InetSocketAddress[]{ new InetSocketAddress( "::1", 0 ), new InetSocketAddress( "::0", 0 ), new InetSocketAddress( "::0", 0 ), new InetSocketAddress( "::0", 0 ), new InetSocketAddress( "::0", 0 ), new InetSocketAddress( "::0", 0 ), new InetSocketAddress( "::0", 0 ), new InetSocketAddress( "::0", 0 ), new InetSocketAddress( "::0", 0 ), new InetSocketAddress( "::0", 0 ) };
 
@@ -45,6 +42,15 @@ public abstract class Connection {
     private BitQueue reliableMessageQueue;
     private AtomicInteger nextDatagramSequenceNumber = new AtomicInteger( 0 );
     private int expectedDatagramSequenceNumber;
+
+    // Packet loss tracking
+    private int packetsACKed;
+    private int packetsNAKed;
+    private long nextPacketLossCheck;
+
+    // RTT tracking
+    private List<Integer> latestRTT = new ArrayList<>( 33 ); // Raknet uses 33 "pings" to check RTT
+    private int rtt;
 
     // Ordering Channels
     private int[] orderedReadIndex;
@@ -444,7 +450,28 @@ public abstract class Connection {
      * @param time The current system time
      */
     protected void postUpdate( long time ) {
+        if ( time > this.nextPacketLossCheck ) {
+            if ( this.packetsNAKed > 0 ) {
+                int totalPackets = this.packetsACKed + this.packetsNAKed;
 
+                this.getImplementationLogger().warn( "Packet loss detected: {}% | Resend queue: {} | ACK: {} | NAK: {} | RTT: {}",
+                        String.format( "%.03f", ( this.packetsNAKed / (double) totalPackets ) * 100 ), this.resendQueue.size(),
+                        this.packetsACKed, this.packetsNAKed, this.rtt );
+            }
+
+            this.packetsNAKed = 0;
+            this.packetsACKed = 0;
+            this.nextPacketLossCheck = time + 1000;
+        }
+
+        if ( this.latestRTT.size() == 33 ) {
+            int sum = 0;
+            for ( Integer currentRTT : this.latestRTT ) {
+                sum += currentRTT;
+            }
+
+            this.rtt = sum / 33;
+        }
     }
 
     /**
@@ -575,7 +602,7 @@ public abstract class Connection {
         this.datagramContentBuffer = null;
     }
 
-    private int pushPacket( List<EncapsulatedPacket> sendList, EncapsulatedPacket packet, int currentDatagramSize ) {
+    private int pushPacket( List<EncapsulatedPacket> sendList, EncapsulatedPacket packet, int currentDatagramSize, long time ) {
         int maxDatagramSize = this.mtuSize - DATA_HEADER_BYTE_LENGTH;
 
         // Push current datagram to send queue if adding this packet would exceed the MTU:
@@ -604,7 +631,7 @@ public abstract class Connection {
                     }
                 }
 
-                encapsulatedPacket.writeToBuffer( buffer );
+                encapsulatedPacket.writeToBuffer( buffer, time );
             }
             sendList.clear();
 
@@ -633,8 +660,8 @@ public abstract class Connection {
         while ( !this.resendQueue.isEmpty() ) {
             EncapsulatedPacket packet = this.resendQueue.peek();
             if ( packet.getNextExecution() <= time ) {
-                // Delete packets marked for removal or which are lost now (has been resend 10 times):
-                if ( packet.getNextExecution() == 0L || packet.getSendCount() > 9 ) {
+                // Delete packets marked for removal
+                if ( packet.getNextExecution() == 0L ) {
                     this.resendQueue.poll();
                     continue;
                 }
@@ -644,13 +671,14 @@ public abstract class Connection {
                     break;
                 }
 
-                currentDatagramSize = this.pushPacket( sendList, packet, currentDatagramSize );
+                currentDatagramSize = this.pushPacket( sendList, packet, currentDatagramSize, time );
 
                 this.resendQueue.poll();
                 packet.setNextExecution( time + getResendTime( packet ) ); // Default Raknet uses a scaling from 100ms to 10 seconds for this
                 packet.incrementSendCount();
 
-                LOGGER.debug( "Resending packet due to client not acking it" );
+                this.getImplementationLogger().debug( "Resending packet due to client not acking it" );
+                this.packetsNAKed++; // We tread this as NAK
 
                 // Insert back into resend queue:
                 this.resendQueue.add( packet );
@@ -674,14 +702,14 @@ public abstract class Connection {
                 packet.setReliableMessageNumber( this.nextReliableMessageNumber.getAndIncrement() );
 
                 // Insert into resend queue:
-                packet.setNextExecution( time + DEFAULT_RESEND_TIMEOUT );
+                packet.setNextExecution( time + getResendTime( packet ) );
                 this.resendQueue.add( packet );
 
                 // Add to FixedSize round-robin resend buffer:
                 this.resendBuffer.set( packet.getReliableMessageNumber(), packet );
             }
 
-            currentDatagramSize = this.pushPacket( sendList, packet, currentDatagramSize );
+            currentDatagramSize = this.pushPacket( sendList, packet, currentDatagramSize, time );
         }
 
         // Push the final datagram if any is to be pushed:
@@ -710,7 +738,7 @@ public abstract class Connection {
                     }
                 }
 
-                encapsulatedPacket.writeToBuffer( buffer );
+                encapsulatedPacket.writeToBuffer( buffer, time );
             }
             sendList.clear();
 
@@ -727,8 +755,14 @@ public abstract class Connection {
         int max = 10000;
         int min = 100;
 
-        int should = ( packet.getSendCount() + 1 ) * min;
-        return Math.min( should, max );
+        int should;
+        if ( this.rtt > 0 ) {
+            should = this.rtt * 2;
+        } else {
+            should = ( packet.getSendCount() + 1 ) * min;
+        }
+
+        return Math.max( Math.min( should, max ), min );
     }
 
     /**
@@ -851,8 +885,8 @@ public abstract class Connection {
             return;
         }
 
-        for ( int i = 0; i < ranges.length; ++i ) {
-            for ( int j = ranges[i].getMin(); j <= ranges[i].getMax(); ++j ) {
+        for ( TriadRange range : ranges ) {
+            for ( int j = range.getMin(); j <= range.getMax(); ++j ) {
                 // Remove all packets contained in the ACKed datagram from the resend buffer:
                 DatagramContentNode node = this.datagramContentBuffer.get( j );
                 while ( node != null ) {
@@ -860,8 +894,18 @@ public abstract class Connection {
                     if ( packet != null ) {
                         // Enforce deletion on next interaction:
                         packet.setNextExecution( 0L );
-                        this.resendBuffer.set( node.getReliableMessageNumber(), null );
+                        this.resendBuffer.remove( node.getReliableMessageNumber() );
+                        this.packetsACKed++;
+
+                        // Track RTT
+                        int currentRTT = (int) ( this.lastReceivedPacket - packet.getSendTime() );
+                        if ( this.latestRTT.size() == 33 ) {
+                            this.latestRTT.remove( 0 );
+                        }
+
+                        this.latestRTT.add( currentRTT );
                     }
+
                     node = node.getNext();
                 }
             }
@@ -874,16 +918,20 @@ public abstract class Connection {
             return;
         }
 
-        for ( int i = 0; i < ranges.length; ++i ) {
-            for ( int j = ranges[i].getMin(); j <= ranges[i].getMax(); ++j ) {
+        for ( TriadRange range : ranges ) {
+            for ( int j = range.getMin(); j <= range.getMax(); ++j ) {
                 // Enforce immediate resend:
                 DatagramContentNode node = this.datagramContentBuffer.get( j );
                 while ( node != null ) {
                     EncapsulatedPacket packet = this.resendBuffer.get( node.getReliableMessageNumber() );
                     if ( packet != null ) {
+                        this.getImplementationLogger().debug( "Force sending NAKed Packet: {}", packet.getReliableMessageNumber() );
+
                         // Enforce instant resend on next interaction:
                         packet.setNextExecution( 1L );
+                        this.packetsNAKed++;
                     }
+
                     node = node.getNext();
                 }
             }
@@ -902,8 +950,8 @@ public abstract class Connection {
         int maxSize = this.mtuSize - DATA_HEADER_BYTE_LENGTH;
         PacketBuffer buffer = new PacketBuffer( this.mtuSize );
 
-        // IsValid | IsACK | needsBandAS
-        byte flags = (byte) 0x80 | (byte) 0x40 | (byte) 0x04;
+        // IsValid | IsACK
+        byte flags = (byte) 0x80 | (byte) 0x40;
         buffer.writeByte( flags );
 
         this.sendingACKsLock.lock();
@@ -933,7 +981,7 @@ public abstract class Connection {
         // Fast out in sending when there is nothing to do
         this.sendingNAKsLock.lock();
         try {
-            if ( this.outgoingNAKs.size() == 0 ) return;
+            if ( this.outgoingNAKs.isEmpty() ) return;
         } finally {
             this.sendingNAKsLock.unlock();
         }
@@ -941,13 +989,13 @@ public abstract class Connection {
         int maxSize = this.mtuSize - DATA_HEADER_BYTE_LENGTH;
         PacketBuffer buffer = new PacketBuffer( this.mtuSize );
 
-        // IsValid | IsNAK | needBandAS
-        byte flags = (byte) 0x80 | (byte) 0x20 | (byte) 0x04;
+        // IsValid | IsNAK
+        byte flags = (byte) 0x80 | (byte) 0x20;
         buffer.writeByte( flags );
 
         this.sendingNAKsLock.lock();
         try {
-            if ( this.outgoingNAKs.size() > 0 ) {
+            if ( !this.outgoingNAKs.isEmpty() ) {
                 // Serialize ACKs into buffer and remove them afterwards:
                 int count = buffer.writeTriadRangeList( this.outgoingNAKs, 0, this.outgoingNAKs.size(), maxSize );
                 for ( int i = 0; i < count; i++ ) {
@@ -1029,7 +1077,7 @@ public abstract class Connection {
         // ACK this datagram:
         this.sendingACKsLock.lock();
         try {
-            if ( this.outgoingACKs.size() > 0 ) {
+            if ( !this.outgoingACKs.isEmpty() ) {
                 TriadRange lastAdded = this.outgoingACKs.get( this.outgoingACKs.size() - 1 );
                 if ( lastAdded != null ) {
                     if ( lastAdded.getMax() + 1 == datagramSequenceNumber ) {

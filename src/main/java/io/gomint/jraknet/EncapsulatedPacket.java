@@ -1,8 +1,5 @@
 package io.gomint.jraknet;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import static io.gomint.jraknet.RakNetConstraints.NUM_ORDERING_CHANNELS;
 
 /**
@@ -14,8 +11,6 @@ import static io.gomint.jraknet.RakNetConstraints.NUM_ORDERING_CHANNELS;
 // Only deprecated in order to hide it from the JavaDoc
 // @Deprecated
 public class EncapsulatedPacket {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger( EncapsulatedPacket.class );
 
     private PacketReliability reliability = null;
     private int reliableMessageNumber = -1;
@@ -30,6 +25,7 @@ public class EncapsulatedPacket {
     private long weight;
     private long nextExecution;
     private int resendCount;
+    private long sendTime; // Needed to track RTT
 
     public EncapsulatedPacket() {
 
@@ -119,8 +115,9 @@ public class EncapsulatedPacket {
      * Writes the encapsulated packet to the specified packet buffer.
      *
      * @param buffer The packet buffer to write the encapuslated packet to
+     * @param time   The time at which this packet is being written to the datagram buffer
      */
-    public void writeToBuffer( PacketBuffer buffer ) {
+    public void writeToBuffer( PacketBuffer buffer, long time ) {
         byte flags = (byte) ( this.reliability.getId() << 5 );
         if ( this.isSplitPacket() ) {
             flags |= 0x10;
@@ -154,6 +151,8 @@ public class EncapsulatedPacket {
         }
 
         buffer.writeBytes( this.packetData );
+
+        this.sendTime = time;
     }
 
     public int getHeaderLength() {
@@ -285,6 +284,10 @@ public class EncapsulatedPacket {
 
     public int getSendCount() {
         return this.resendCount;
+    }
+
+    public long getSendTime() {
+        return this.sendTime;
     }
 
 }

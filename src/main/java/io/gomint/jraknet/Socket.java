@@ -5,7 +5,6 @@ import io.netty.channel.Channel;
 import org.slf4j.Logger;
 
 import java.net.InetSocketAddress;
-import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -19,9 +18,6 @@ public abstract class Socket implements AutoCloseable {
 
     protected Bootstrap udpSocket;
     protected Channel channel;
-
-    // Threads used for modeling network "events"
-    private ScheduledFuture<Void> updateFuture;
 
     // Lifecycle
     private AtomicBoolean running = new AtomicBoolean( false );
@@ -77,12 +73,6 @@ public abstract class Socket implements AutoCloseable {
     public void close() {
         // Stop all threads safely:
         this.running.set( false );
-
-        // Cancel the updater
-        if ( this.updateFuture != null ) {
-            this.updateFuture.cancel( true );
-            this.updateFuture = null;
-        }
 
         // Close the UDP socket:
         this.channel.close();
@@ -185,7 +175,7 @@ public abstract class Socket implements AutoCloseable {
                     Socket.this.getImplementationLogger().error( "Exception in updating connections", t );
                 }
             }
-        }, 0, 10, TimeUnit.MILLISECONDS );
+        }, 0, 50, TimeUnit.MILLISECONDS );
     }
 
 }
