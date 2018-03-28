@@ -1291,9 +1291,11 @@ public abstract class Connection {
     private void handleConnectedPong( @SuppressWarnings( "unused" ) EncapsulatedPacket packet ) {
         PacketBuffer buffer = new PacketBuffer( packet.getPacketData(), 1 );
         long inPacket = buffer.readLong();
+        long outPacket = buffer.readLong();
+
         if ( inPacket == this.currentPingTime ) {
             this.lastPingTime = this.currentPingTime;
-            this.lastPongTime = System.currentTimeMillis();
+            this.lastPongTime = outPacket;
         }
     }
 
@@ -1317,6 +1319,7 @@ public abstract class Connection {
         PacketBuffer buffer = new PacketBuffer( 9 );
         buffer.writeByte( CONNECTED_PONG );
         buffer.writeLong( pingTime );
+        buffer.writeLong( System.currentTimeMillis() );
         this.send( PacketReliability.UNRELIABLE, buffer.getBuffer() );
     }
 
