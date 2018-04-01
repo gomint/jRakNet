@@ -1291,11 +1291,11 @@ public abstract class Connection {
     private void handleConnectedPong( @SuppressWarnings( "unused" ) EncapsulatedPacket packet ) {
         PacketBuffer buffer = new PacketBuffer( packet.getPacketData(), 1 );
         long inPacket = buffer.readLong();
-        long outPacket = buffer.readLong();
+        buffer.readLong();
 
         if ( inPacket == this.currentPingTime ) {
             this.lastPingTime = this.currentPingTime;
-            this.lastPongTime = outPacket;
+            this.lastPongTime = System.currentTimeMillis();
         }
     }
 
