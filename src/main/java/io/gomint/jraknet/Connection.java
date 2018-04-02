@@ -924,7 +924,7 @@ public abstract class Connection {
                 DatagramContentNode node = this.datagramContentBuffer.get( j );
                 while ( node != null ) {
                     EncapsulatedPacket packet = this.resendBuffer.get( node.getReliableMessageNumber() );
-                    if ( packet != null ) {
+                    if ( packet != null && packet.getNextExecution() > 1L ) {
                         this.getImplementationLogger().debug( "Force sending NAKed Packet: {}", packet.getReliableMessageNumber() );
 
                         // Enforce instant resend on next interaction:
