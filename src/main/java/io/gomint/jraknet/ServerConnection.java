@@ -226,7 +226,7 @@ class ServerConnection extends Connection {
 	// ================================ PACKET SENDERS ================================ //
 
 	private void sendIncompatibleProtocolVersion() {
-		PacketBuffer buffer = new PacketBuffer( 22 );
+		PacketBuffer buffer = new PacketBuffer( 26 );
 		buffer.writeByte( INCOMPATIBLE_PROTOCOL_VERSION );
 		buffer.writeByte( server.mojangModificationEnabled ? RAKNET_PROTOCOL_VERSION_MOJANG : RAKNET_PROTOCOL_VERSION );
 		buffer.writeOfflineMessageDataId();

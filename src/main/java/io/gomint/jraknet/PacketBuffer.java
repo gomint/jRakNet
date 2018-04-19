@@ -244,22 +244,23 @@ public class PacketBuffer {
         return decodeZigZag64( val );
     }
 
+
+
     private BigInteger readVarNumber( int length ) {
         BigInteger result = BigInteger.ZERO;
         int offset = 0;
-        int b;
 
         do {
-            if ( offset >= length ) {
-                throw new IllegalArgumentException( "Var Number too big" );
+            long b;
+            if ( ( ( b = (long) this.readByte() ) & 128L ) == 0L ) {
+                return result.or( BigInteger.valueOf( b << ( offset * 7 ) ) );
             }
 
-            b = this.readByte();
-            result = result.or( BigInteger.valueOf( ( b & 0x7f ) << ( offset * 7 ) ) );
+            result = result.or( BigInteger.valueOf( ( b & 127L ) << offset * 7 ) );
             offset++;
-        } while ( ( b & 0x80 ) > 0 );
+        } while ( offset < length );
 
-        return result;
+        throw new IllegalArgumentException( "Var Number too big" );
     }
 
     private long encodeZigZag32( int v ) {
