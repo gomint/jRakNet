@@ -175,7 +175,7 @@ public abstract class Socket implements AutoCloseable {
                     Socket.this.getImplementationLogger().error( "Exception in updating connections", t );
                 }
             }
-        }, 0, 50, TimeUnit.MILLISECONDS );
+        }, 0, 10, TimeUnit.MILLISECONDS );
     }
 
 }

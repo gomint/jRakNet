@@ -54,6 +54,9 @@ public class RakNetConstraints {
 	// Any -> Any
 	public static final byte CONNECTED_PONG = (byte) 0x03;
 
+	// Server -> Client
+	public static final byte DETECT_LOST_CONNECTION = (byte) 0x04;
+
 	// Client -> Server
 	//
 	// Sent in order to establish a viable connection

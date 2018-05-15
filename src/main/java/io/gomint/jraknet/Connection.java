@@ -1329,4 +1329,10 @@ public abstract class Connection {
         this.send( PacketReliability.RELIABLE_ORDERED, 0, data );
     }
 
+    void sendDetectLostConnection() {
+        byte[] data = new byte[1];
+        data[0] = DETECT_LOST_CONNECTION;
+        this.send( PacketReliability.RELIABLE, 0, data );
+    }
+
 }

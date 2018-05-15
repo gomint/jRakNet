@@ -18,6 +18,9 @@ class ServerConnection extends Connection {
 	// References
 	private final ServerSocket server;
 
+	// Lost connection
+	private long lastConnectionLostCheck;
+
 	ServerConnection( ServerSocket server, InetSocketAddress address, ConnectionState initialState ) {
 		super( address, initialState );
 		this.server = server;
@@ -330,6 +333,17 @@ class ServerConnection extends Connection {
 	private void sendConnectionRequestFailed() {
 		// Simply send NO_FREE_INCOMING_CONNECTIONS
 		this.sendNoFreeIncomingConnections();
+	}
+
+	@Override
+	protected void preUpdate( long time ) {
+		super.preUpdate( time );
+
+		// When we did not get a packet in the last 2 seconds send detect lost connection
+		if ( this.isConnected() && this.getLastReceivedPacketTime() + 2000L < time && this.lastConnectionLostCheck + 2000L < time ) {
+			this.sendDetectLostConnection();
+			this.lastConnectionLostCheck = time;
+		}
 	}
 
 }

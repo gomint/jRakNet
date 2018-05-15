@@ -245,7 +245,6 @@ public class PacketBuffer {
     }
 
 
-
     private BigInteger readVarNumber( int length ) {
         BigInteger result = BigInteger.ZERO;
         int offset = 0;
