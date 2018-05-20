@@ -1,15 +1,13 @@
 package io.gomint.jraknet;
 
 import io.gomint.jraknet.datastructures.*;
+import io.netty.channel.EventLoop;
 import org.slf4j.Logger;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.*;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
@@ -91,12 +89,16 @@ public abstract class Connection {
     // Data processors
     private List<Function<EncapsulatedPacket, EncapsulatedPacket>> dataProcessors = new CopyOnWriteArrayList<>();
 
+    // Updater thread
+    private ScheduledFuture<?> updater;
+
     // ================================ CONSTRUCTORS ================================ //
 
     Connection( InetSocketAddress address, ConnectionState initialState ) {
         this.address = address;
         this.state = initialState;
         this.reset();
+        this.initUpdater();
     }
 
     // ================================ PUBLIC API ================================ //
@@ -924,7 +926,7 @@ public abstract class Connection {
                 DatagramContentNode node = this.datagramContentBuffer.get( j );
                 while ( node != null ) {
                     EncapsulatedPacket packet = this.resendBuffer.get( node.getReliableMessageNumber() );
-                    if ( packet != null && packet.getNextExecution() > 1L ) {
+                    if ( packet != null ) {
                         this.getImplementationLogger().debug( "Force sending NAKed Packet: {}", packet.getReliableMessageNumber() );
 
                         // Enforce instant resend on next interaction:
@@ -1333,6 +1335,19 @@ public abstract class Connection {
         byte[] data = new byte[1];
         data[0] = DETECT_LOST_CONNECTION;
         this.send( PacketReliability.RELIABLE, 0, data );
+    }
+
+    void initUpdater() {
+        // Attach to the current event loop
+        this.updater = EventLoops.LOOP_GROUP.scheduleAtFixedRate( () -> {
+            if ( !update( System.currentTimeMillis() ) ) {
+                notifyRemoval();
+            }
+        }, 0, 10, TimeUnit.MILLISECONDS );
+    }
+
+    void notifyRemoval() {
+        this.updater.cancel( true );
     }
 
 }

@@ -124,6 +124,26 @@ class ServerConnection extends Connection {
 		this.server.propagateFullyConnectedConnection( this );
 	}
 
+	@Override
+	boolean update( long time ) {
+		// Timeout
+		if ( this.getLastReceivedPacketTime() + CONNECTION_TIMEOUT_MILLIS < time ) {
+			this.notifyTimeout();
+			return false;
+		}
+
+		return super.update( time );
+	}
+
+	@Override
+	void notifyRemoval() {
+		if ( hasGuid() ) {
+			this.server.removeConnection( this );
+		}
+
+		super.notifyRemoval();
+	}
+
 	// ================================ PACKET HANDLERS ================================ //
 
 	private void handlePreConnectionRequest1( InetSocketAddress sender, PacketBuffer datagram ) {

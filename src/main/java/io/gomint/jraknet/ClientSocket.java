@@ -99,8 +99,6 @@ public class ClientSocket extends Socket {
             exception.initCause( e );
             throw exception;
         }
-
-        this.afterInitialize();
     }
 
     /**
@@ -227,39 +225,6 @@ public class ClientSocket extends Socket {
         }
     }
 
-    /**
-     * Updates all connections this socket created.
-     *
-     * @param time The current system time
-     */
-    @Override
-    protected void updateConnections( long time ) {
-        if ( this.connection != null ) {
-            if ( this.connection.getLastReceivedPacketTime() + CONNECTION_TIMEOUT_MILLIS < time ) {
-                this.connection.notifyTimeout();
-                this.connection = null;
-            } else {
-                if ( !this.connection.update( time ) ) {
-                    this.connection = null;
-                }
-            }
-        }
-    }
-
-    /**
-     * Invoked after the update thread was stopped but right before it terminates. May perform any necessary
-     * cleanup.
-     */
-    @Override
-    protected void cleanupUpdateThread() {
-        // long time = System.currentTimeMillis();
-        if ( this.connection != null ) {
-            this.connection.disconnect( "Socket is closing" );
-            // this.connection.update( time );
-        }
-        this.connection = null;
-    }
-
     // ================================ INTERNALS ================================ //
 
     /**
@@ -371,6 +336,10 @@ public class ClientSocket extends Socket {
                 serverGuid,
                 motd );
         this.propagateEvent( new SocketEvent( SocketEvent.Type.UNCONNECTED_PONG, info ) );
+    }
+
+    public void removeConnection() {
+        this.connection = null;
     }
 
 }

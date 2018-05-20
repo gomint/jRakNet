@@ -139,10 +139,6 @@ public class ServerSocket extends Socket {
 
 		this.connectionsByAddress = new ConcurrentHashMap<>( this.maxConnections );
 		this.connectionsByGuid = new ConcurrentHashMap<>( this.maxConnections );
-
-		// Initialize other subsystems; won't get here if bind fails as DatagramSocket's
-		// constructor will throw SocketException:
-		this.afterInitialize();
 	}
 
 	/**
@@ -161,6 +157,12 @@ public class ServerSocket extends Socket {
 	@Override
 	public void close() {
 		super.close();
+
+		// Disconnect all connections
+		for ( ServerConnection connection : this.activeConnections ) {
+			connection.disconnect( "Server shutdown" );
+		}
+
 		this.bindAddress = null;
 	}
 
@@ -214,55 +216,6 @@ public class ServerSocket extends Socket {
 			// attempt chain:
 			connection.handleDatagram( sender, datagram, time );
 		}
-	}
-
-	/**
-	 * Updates all connections this socket created.
-	 *
-	 * @param time The current system time
-	 */
-	@Override
-	protected void updateConnections( long time ) {
-		// Update all connections:
-		Iterator<Map.Entry<SocketAddress, ServerConnection>> it = this.connectionsByAddress.entrySet().iterator();
-		while ( it.hasNext() ) {
-			ServerConnection connection = it.next().getValue();
-			if ( connection.getLastReceivedPacketTime() + CONNECTION_TIMEOUT_MILLIS < time ) {
-				connection.notifyTimeout();
-				it.remove();
-
-				if ( connection.hasGuid() ) {
-					this.connectionsByGuid.remove( connection.getGuid() );
-                    this.activeConnections.remove( connection );
-				}
-			} else {
-				if ( !connection.update( time ) ) {
-					it.remove();
-
-					if ( connection.hasGuid() ) {
-						this.connectionsByGuid.remove( connection.getGuid() );
-						this.activeConnections.remove( connection );
-					}
-				}
-			}
-		}
-	}
-
-	/**
-	 * Invoked after the update thread was stopped but right before it terminates. May perform any necessary
-	 * cleanup.
-	 */
-	@Override
-	protected void cleanupUpdateThread() {
-		// Disconnect all connections lingering around:
-		long time = System.currentTimeMillis();
-		for ( ServerConnection connection : this.connectionsByAddress.values() ) {
-			connection.disconnect( "Server is closing" );
-			connection.update( time );
-		}
-		this.connectionsByAddress = null;
-		this.connectionsByGuid.clear();
-		this.connectionsByGuid = null;
 	}
 
 	// ================================ INTERNALS ================================ //
@@ -447,6 +400,11 @@ public class ServerSocket extends Socket {
 		}
 
 		return connection;
+	}
+
+	public void removeConnection( ServerConnection connection ) {
+		this.connectionsByGuid.remove( connection.getGuid() );
+		this.activeConnections.remove( connection );
 	}
 
 }
