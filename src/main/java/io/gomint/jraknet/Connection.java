@@ -64,7 +64,7 @@ public abstract class Connection {
     private BlockingQueue<EncapsulatedPacket> receiveBuffer;
 
     // Sending
-    private BlockingQueue<EncapsulatedPacket> sendBuffer;
+    private Queue<EncapsulatedPacket> sendBuffer;
     private AtomicInteger nextReliableMessageNumber = new AtomicInteger( 0 );
     private int nextSplitPacketID;
     private List<TriadRange> outgoingACKs;
@@ -74,7 +74,7 @@ public abstract class Connection {
 
     // Resending
     private FixedSizeRRBuffer<EncapsulatedPacket> resendBuffer;
-    private BlockingQueue<EncapsulatedPacket> resendQueue;
+    private Queue<EncapsulatedPacket> resendQueue;
     private FixedSizeRRBuffer<DatagramContentNode> datagramContentBuffer;
 
     // Disconnect
@@ -566,9 +566,9 @@ public abstract class Connection {
         this.receiveBuffer = new LinkedBlockingQueue<>();
         this.outgoingACKs = new ArrayList<>( 128 );
         this.outgoingNAKs = new ArrayList<>( 128 );
-        this.sendBuffer = new LinkedBlockingQueue<>();
+        this.sendBuffer = new ConcurrentLinkedQueue<>();
         this.resendBuffer = new FixedSizeRRBuffer<>( 512 );
-        this.resendQueue = new LinkedBlockingQueue<>();
+        this.resendQueue = new ConcurrentLinkedQueue<>();
         this.datagramContentBuffer = new FixedSizeRRBuffer<>( 512 );
     }
 
@@ -660,29 +660,22 @@ public abstract class Connection {
 
         // Resend everything scheduled for resend:
         int limit = 16;
-        int checked = 0;
 
-        while ( checked != this.resendQueue.size() ) {
-            EncapsulatedPacket packet = this.resendQueue.peek();
-            checked++;
+        if ( !this.resendQueue.isEmpty() ) {
+            Iterator<EncapsulatedPacket> resendIterator = this.resendQueue.iterator();
+            while ( resendIterator.hasNext() ) {
+                EncapsulatedPacket packet = resendIterator.next();
+                if ( packet.getNextExecution() == 0L ) {
+                    resendIterator.remove();
+                } else if ( packet.getNextExecution() <= time && --limit <= 0 ) {
+                    currentDatagramSize = this.pushPacket( sendList, packet, currentDatagramSize, time );
 
-            // Sort out all 0 (delete) packets
-            if ( packet.getNextExecution() == 0L ) {
-                this.resendQueue.poll();
-                checked--;
-            } else if ( packet.getNextExecution() <= time && --limit <= 0 ) {
-                currentDatagramSize = this.pushPacket( sendList, packet, currentDatagramSize, time );
+                    packet.setNextExecution( time + getResendTime( packet ) ); // Default Raknet uses a scaling from 100ms to 10 seconds for this
+                    packet.incrementSendCount();
 
-                this.resendQueue.poll();
-                checked--;
-                packet.setNextExecution( time + getResendTime( packet ) ); // Default Raknet uses a scaling from 100ms to 10 seconds for this
-                packet.incrementSendCount();
-
-                this.getImplementationLogger().debug( "Resending packet due to client not acking it: {}", packet.getReliableMessageNumber() );
-                this.packetsNAKed++; // We tread this as NAK
-
-                // Insert back into resend queue:
-                this.resendQueue.add( packet );
+                    this.getImplementationLogger().debug( "Resending packet due to client not acking it: {}", packet.getReliableMessageNumber() );
+                    this.packetsNAKed++; // We tread this as NAK
+                }
             }
         }
 
