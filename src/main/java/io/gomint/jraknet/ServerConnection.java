@@ -177,7 +177,7 @@ class ServerConnection extends Connection {
 
 		datagram.skip( 1 );                                                                       // Packet ID
 		datagram.readOfflineMessageDataId();                                                      // Offline Message Data ID
-		@SuppressWarnings( "unused" ) InetSocketAddress bindAddress = datagram.readAddress();     // Address the client bound to
+		@SuppressWarnings( "unused" ) InetSocketAddress bindAddress = datagram.readAddress();     					  // Address the client bound to
 		this.setMtuSize( datagram.readUShort() );                                                 // MTU
 		this.setGuid( datagram.readLong() );                                                      // Client GUID
 
@@ -193,6 +193,7 @@ class ServerConnection extends Connection {
 
 		// Do this before sending the response:
 		this.initializeStructures();
+		this.server.addGuidConnection( this );
 
 		this.sendConnectionReply2();
 		this.setState( ConnectionState.RELIABLE );

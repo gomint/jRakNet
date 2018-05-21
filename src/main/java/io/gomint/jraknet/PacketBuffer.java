@@ -587,4 +587,26 @@ public class PacketBuffer {
         this.position = position;
     }
 
+    @Override
+    public String toString() {
+        if ( this.buffer == null ) {
+            return "null";
+        }
+        int iMax = this.buffer.length - 1;
+        if ( iMax == -1 ) {
+            return "[]";
+        }
+
+        StringBuilder b = new StringBuilder();
+        b.append( '[' );
+        for ( int i = 0; ; i++ ) {
+            b.append( Integer.toHexString( this.buffer[i] & 0xFF ) );
+            if ( i == iMax ) {
+                return b.append( ']' ).toString();
+            }
+
+            b.append( ", " );
+        }
+    }
+
 }

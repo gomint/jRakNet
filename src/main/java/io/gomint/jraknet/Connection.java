@@ -1,7 +1,6 @@
 package io.gomint.jraknet;
 
 import io.gomint.jraknet.datastructures.*;
-import io.netty.channel.EventLoop;
 import org.slf4j.Logger;
 
 import java.io.IOException;
@@ -622,6 +621,8 @@ public abstract class Connection {
 
             DatagramContentNode dcn = null;
             for ( EncapsulatedPacket encapsulatedPacket : sendList ) {
+                encapsulatedPacket.addDatagramNode( nextDiaNumber );
+
                 // Add this packet to the datagram content buffer if reliable:
                 if ( encapsulatedPacket.getReliability() != PacketReliability.UNRELIABLE && encapsulatedPacket.getReliability() != PacketReliability.UNRELIABLE_SEQUENCED ) {
                     if ( dcn == null ) {
@@ -679,7 +680,7 @@ public abstract class Connection {
                 packet.setNextExecution( time + getResendTime( packet ) ); // Default Raknet uses a scaling from 100ms to 10 seconds for this
                 packet.incrementSendCount();
 
-                this.getImplementationLogger().debug( "Resending packet due to client not acking it" );
+                this.getImplementationLogger().debug( "Resending packet due to client not acking it: {}", packet.getReliableMessageNumber() );
                 this.packetsNAKed++; // We tread this as NAK
 
                 // Insert back into resend queue:
@@ -729,6 +730,8 @@ public abstract class Connection {
 
             DatagramContentNode dcn = null;
             for ( EncapsulatedPacket encapsulatedPacket : sendList ) {
+                encapsulatedPacket.addDatagramNode( nextDiaNumber );
+
                 // Add this packet to the datagram content buffer if reliable:
                 if ( encapsulatedPacket.getReliability() != PacketReliability.UNRELIABLE && encapsulatedPacket.getReliability() != PacketReliability.UNRELIABLE_SEQUENCED ) {
                     if ( dcn == null ) {
@@ -894,10 +897,27 @@ public abstract class Connection {
                 while ( node != null ) {
                     EncapsulatedPacket packet = this.resendBuffer.get( node.getReliableMessageNumber() );
                     if ( packet != null ) {
-                        // Enforce deletion on next interaction:
-                        packet.setNextExecution( 0L );
-                        this.resendBuffer.remove( node.getReliableMessageNumber() );
-                        this.packetsACKed++;
+                        // Check if we have other datagrams holding reference to this packet
+                        synchronized ( packet.getDatagrammNodes() ) {
+                            if ( !packet.getDatagrammNodes().isEmpty() ) {
+                                Iterator<Integer> datagramNodes = packet.getDatagrammNodes().iterator();
+                                while ( datagramNodes.hasNext() ) {
+                                    if ( datagramNodes.next() == j ) {
+                                        datagramNodes.remove();
+                                    }
+                                }
+                            }
+
+                            // Are all datagrams ACKed?
+                            if ( packet.getDatagrammNodes().isEmpty() && packet.getNextExecution() > 1 ) { // Only remove when not nak'd
+                                // Enforce deletion on next interaction:
+                                packet.setNextExecution( 0L );
+                                this.getImplementationLogger().debug( "Removing packet {} due to client ACK", node.getReliableMessageNumber() );
+                                this.resendBuffer.remove( node.getReliableMessageNumber() );
+                            }
+
+                            this.packetsACKed++;
+                        }
 
                         // Track RTT
                         int currentRTT = (int) ( this.lastReceivedPacket - packet.getSendTime() );
@@ -924,14 +944,24 @@ public abstract class Connection {
             for ( int j = range.getMin(); j <= range.getMax(); ++j ) {
                 // Enforce immediate resend:
                 DatagramContentNode node = this.datagramContentBuffer.get( j );
+                if ( node == null ) {
+                    this.getImplementationLogger().debug( "Wanted to NAK but datagram is not there anymore: {}", j );
+                }
+
                 while ( node != null ) {
                     EncapsulatedPacket packet = this.resendBuffer.get( node.getReliableMessageNumber() );
                     if ( packet != null ) {
+                        synchronized (  packet.getDatagrammNodes() ) {
+                            packet.getDatagrammNodes().clear();
+                        }
+
                         this.getImplementationLogger().debug( "Force sending NAKed Packet: {}", packet.getReliableMessageNumber() );
 
                         // Enforce instant resend on next interaction:
                         packet.setNextExecution( 1L );
                         this.packetsNAKed++;
+                    } else {
+                        this.getImplementationLogger().debug( "Wanted for resend Packet {} but its not there anymore", node.getReliableMessageNumber() );
                     }
 
                     node = node.getNext();
