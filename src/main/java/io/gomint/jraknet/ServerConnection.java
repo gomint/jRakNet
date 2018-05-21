@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetSocketAddress;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static io.gomint.jraknet.RakNetConstraints.*;
 
@@ -20,6 +21,11 @@ class ServerConnection extends Connection {
 
 	// Lost connection
 	private long lastConnectionLostCheck;
+
+	// Traffic counters
+	private long lastTrafficStats;
+	private AtomicLong bytesSend = new AtomicLong( 0 );
+	private AtomicLong bytesReceived = new AtomicLong( 0 );
 
 	ServerConnection( ServerSocket server, InetSocketAddress address, ConnectionState initialState ) {
 		super( address, initialState );
@@ -39,6 +45,7 @@ class ServerConnection extends Connection {
 	 */
 	@Override
 	protected void sendRaw( InetSocketAddress recipient, PacketBuffer buffer ) throws IOException {
+		this.bytesSend.addAndGet( buffer.getPosition() - buffer.getBufferOffset() );
 		this.server.send( recipient, buffer );
 	}
 
@@ -50,6 +57,12 @@ class ServerConnection extends Connection {
 	@Override
 	protected Logger getImplementationLogger() {
 		return this.server.getImplementationLogger();
+	}
+
+	@Override
+	void handleDatagram( InetSocketAddress sender, PacketBuffer datagram, long time ) {
+		this.bytesReceived.addAndGet( datagram.getRemaining() );
+		super.handleDatagram( sender, datagram, time );
 	}
 
 	/**
@@ -367,4 +380,14 @@ class ServerConnection extends Connection {
 		}
 	}
 
+	@Override
+	protected void postUpdate( long time ) {
+		super.postUpdate( time );
+
+		if ( this.lastTrafficStats + 1000L < time ) {
+			this.lastTrafficStats = time;
+
+			this.getImplementationLogger().debug( "Traffic stats: {} bytes tx {} bytes rx", this.bytesSend.getAndSet( 0 ), this.bytesReceived.getAndSet( 0 ) );
+		}
+	}
 }

@@ -1,8 +1,6 @@
 package io.gomint.jraknet;
 
-import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
 
 import static io.gomint.jraknet.RakNetConstraints.NUM_ORDERING_CHANNELS;
@@ -32,8 +30,6 @@ public class EncapsulatedPacket {
     private int resendCount;
     private long sendTime; // Needed to track RTT
 
-    private Set<Integer> datagramNodes = new HashSet<>();
-
     public EncapsulatedPacket() {
 
     }
@@ -48,7 +44,6 @@ public class EncapsulatedPacket {
         this.splitPacketId = other.splitPacketId;
         this.splitPacketIndex = other.splitPacketIndex;
         this.packetData = other.packetData;
-        this.datagramNodes = other.datagramNodes;
     }
 
     /**
@@ -298,14 +293,13 @@ public class EncapsulatedPacket {
         return this.sendTime;
     }
 
-    public void addDatagramNode( int nextDiaNumber ) {
-        synchronized ( this.datagramNodes ) {
-            this.datagramNodes.add( nextDiaNumber );
+    @Override
+    public boolean equals( Object obj ) {
+        if ( !( obj instanceof EncapsulatedPacket ) ) {
+            return false;
         }
-    }
 
-    public Set<Integer> getDatagrammNodes() {
-        return this.datagramNodes;
+        return this.reliableMessageNumber == ( (EncapsulatedPacket) obj ).reliableMessageNumber;
     }
 
 }
