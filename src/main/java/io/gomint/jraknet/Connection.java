@@ -669,7 +669,7 @@ public abstract class Connection {
 
                 if ( packet.getNextExecution() == 0L ) {
                     resendIterator.remove();
-                } else if ( packet.getNextExecution() <= time && --limit <= 0 ) {
+                } else if ( packet.getNextExecution() <= time && --limit > 0 ) {
                     currentDatagramSize = this.pushPacket( sendList, packet, currentDatagramSize, time );
 
                     packet.setNextExecution( time + getResendTime( packet ) ); // Default Raknet uses a scaling from 100ms to 10 seconds for this
