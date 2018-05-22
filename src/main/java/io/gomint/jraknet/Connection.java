@@ -665,6 +665,8 @@ public abstract class Connection {
             Iterator<EncapsulatedPacket> resendIterator = this.resendQueue.iterator();
             while ( resendIterator.hasNext() ) {
                 EncapsulatedPacket packet = resendIterator.next();
+                this.getImplementationLogger().debug( "Having packet {} with execution timer {}", packet.getReliableMessageNumber(), packet.getNextExecution() );
+
                 if ( packet.getNextExecution() == 0L ) {
                     resendIterator.remove();
                 } else if ( packet.getNextExecution() <= time && --limit <= 0 ) {
@@ -928,7 +930,6 @@ public abstract class Connection {
 
                         // Enforce instant resend on next interaction:
                         packet.setNextExecution( 1L );
-                        this.packetsNAKed++;
                     } else {
                         this.getImplementationLogger().debug( "Wanted for resend Packet {} but its not there anymore", node.getReliableMessageNumber() );
                     }
