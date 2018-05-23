@@ -64,7 +64,7 @@ public abstract class Connection {
     private BlockingQueue<EncapsulatedPacket> receiveBuffer;
 
     // Sending
-    private Queue<EncapsulatedPacket> sendBuffer;
+    private Deque<EncapsulatedPacket> sendBuffer;
     private AtomicInteger nextReliableMessageNumber = new AtomicInteger( 0 );
     private int nextSplitPacketID;
     private List<TriadRange> outgoingACKs;
@@ -93,8 +93,7 @@ public abstract class Connection {
 
     // Congestion control
     private SlidingWindow slidingWindow;
-    private int unackedBytes;
-
+    private AtomicInteger unackedBytes = new AtomicInteger( 0 );
 
     // ================================ CONSTRUCTORS ================================ //
 
@@ -572,7 +571,7 @@ public abstract class Connection {
         this.receiveBuffer = new LinkedBlockingQueue<>();
         this.outgoingACKs = new ArrayList<>( 128 );
         this.outgoingNAKs = new ArrayList<>( 128 );
-        this.sendBuffer = new ConcurrentLinkedQueue<>();
+        this.sendBuffer = new ConcurrentLinkedDeque<>();
         this.resendBuffer = new FixedSizeRRBuffer<>( 512 );
         this.resendQueue = new ConcurrentLinkedQueue<>();
         this.datagramContentBuffer = new FixedSizeRRBuffer<>( 512 );
@@ -666,7 +665,7 @@ public abstract class Connection {
 
         // Resend everything scheduled for resend:
         if ( !this.resendQueue.isEmpty() ) {
-            int maxResendBytes = this.slidingWindow.getReTransmissionBandwidth( this.unackedBytes );
+            int maxResendBytes = this.slidingWindow.getReTransmissionBandwidth( this.unackedBytes.get() );
             int currentResendBytes = 0;
             boolean onResendCalled = false;
 
@@ -696,23 +695,24 @@ public abstract class Connection {
         }
 
         // Attempt to send new packets:
-        int maxTransmission = this.slidingWindow.getTransmissionBandwidth( this.unackedBytes );
+        int maxTransmission = this.slidingWindow.getTransmissionBandwidth( this.unackedBytes.get() );
         int currentSendBytes = 0;
 
+        this.getImplementationLogger().debug( "Allowed to send {} bytes new data, unacked {} bytes", maxTransmission, this.unackedBytes.get() );
+
         while ( !this.sendBuffer.isEmpty() && this.resendBuffer.get( this.nextReliableMessageNumber.get() ) == null ) {
-            EncapsulatedPacket packet = this.sendBuffer.peek();
+            EncapsulatedPacket packet = this.sendBuffer.poll();
             if ( packet == null ) {
-                this.sendBuffer.poll();
                 continue;
             }
 
             // Check for max transmission limit
             currentSendBytes += packet.getHeaderLength() + packet.getPacketLength();
             if ( currentSendBytes > maxTransmission ) {
+                this.sendBuffer.offerFirst( packet );
+                this.getImplementationLogger().debug( "Stopped sending new data due to limit {} > {}", currentSendBytes, maxTransmission );
                 break;
             }
-
-            packet = this.sendBuffer.poll();
 
             // Add message numbers
             PacketReliability reliability = packet.getReliability();
@@ -721,7 +721,7 @@ public abstract class Connection {
                     reliability == PacketReliability.RELIABLE_ORDERED ) {
                 packet.setReliableMessageNumber( this.nextReliableMessageNumber.getAndIncrement() );
 
-                this.unackedBytes += packet.getHeaderLength() + packet.getPacketLength();
+                this.unackedBytes.addAndGet( packet.getHeaderLength() + packet.getPacketLength() );
 
                 // Insert into resend queue:
                 packet.setNextExecution( Long.MAX_VALUE ); // When we did not hear from the packet in 10 seconds we have a problem
@@ -929,10 +929,11 @@ public abstract class Connection {
                         // Enforce deletion on next interaction:
                         packet.setNextExecution( 0L );
                         this.resendBuffer.remove( packet.getReliableMessageNumber() );
-                        this.getImplementationLogger().debug( "Removing packet {} due to client ACK", node.getReliableMessageNumber() );
 
                         this.packetsACKed++;
-                        this.unackedBytes -= packet.getHeaderLength() + packet.getPacketLength();
+                        this.unackedBytes.addAndGet( -( packet.getHeaderLength() + packet.getPacketLength() ) );
+
+                        this.getImplementationLogger().debug( "Removing packet {} due to client ACK - remaining unacked bytes: {}", node.getReliableMessageNumber(), this.unackedBytes );
 
                         // Track RTT
                         int currentRTT = (int) ( this.lastReceivedPacket - packet.getSendTime() );
