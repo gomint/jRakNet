@@ -91,6 +91,11 @@ public abstract class Connection {
     // Updater thread
     private ScheduledFuture<?> updater;
 
+    // Congestion control
+    private SlidingWindow slidingWindow;
+    private int unackedBytes;
+
+
     // ================================ CONSTRUCTORS ================================ //
 
     Connection( InetSocketAddress address, ConnectionState initialState ) {
@@ -540,7 +545,8 @@ public abstract class Connection {
 
 
     protected final void setMtuSize( int mtuSize ) {
-        this.mtuSize = Math.min( mtuSize, 1464 );
+        this.mtuSize = Math.min( mtuSize, RakNetConstraints.MAXIMUM_MTU_SIZE );
+        this.slidingWindow = new SlidingWindow( mtuSize );
     }
 
     protected final void setGuid( long guid ) {
@@ -660,31 +666,53 @@ public abstract class Connection {
 
         // Resend everything scheduled for resend:
         if ( !this.resendQueue.isEmpty() ) {
+            int maxResendBytes = this.slidingWindow.getReTransmissionBandwidth( this.unackedBytes );
+            int currentResendBytes = 0;
+            boolean onResendCalled = false;
+
             Iterator<EncapsulatedPacket> resendIterator = this.resendQueue.iterator();
             while ( resendIterator.hasNext() ) {
                 EncapsulatedPacket packet = resendIterator.next();
-                this.getImplementationLogger().debug( "Having packet {} with execution timer {}", packet.getReliableMessageNumber(), packet.getNextExecution() );
-
                 if ( packet.getNextExecution() == 0L ) {
                     resendIterator.remove();
                 } else if ( packet.getNextExecution() <= time ) {
-                    currentDatagramSize = this.pushPacket( sendList, packet, currentDatagramSize, time );
+                    currentResendBytes += packet.getHeaderLength() + packet.getPacketLength();
+                    if ( currentResendBytes <= maxResendBytes ) {
+                        currentDatagramSize = this.pushPacket( sendList, packet, currentDatagramSize, time );
 
-                    packet.setNextExecution( Long.MAX_VALUE ); // MC:PE iterates over all packets in pipe it seems and acks one per tick
-                    packet.incrementSendCount();
+                        if ( !onResendCalled ) {
+                            this.slidingWindow.onResend();
+                            onResendCalled = true;
+                        }
 
-                    this.getImplementationLogger().debug( "Resending packet due to client not acking it: {}", packet.getReliableMessageNumber() );
-                    this.packetsNAKed++; // We tread this as NAK
+                        packet.setNextExecution( time + getResendTime( packet ) );
+                        packet.incrementSendCount();
+
+                        this.getImplementationLogger().debug( "Resending packet due to client not acking it: {}", packet.getReliableMessageNumber() );
+                        this.packetsNAKed++; // We tread this as NAK
+                    }
                 }
             }
         }
 
         // Attempt to send new packets:
+        int maxTransmission = this.slidingWindow.getTransmissionBandwidth( this.unackedBytes );
+        int currentSendBytes = 0;
+
         while ( !this.sendBuffer.isEmpty() && this.resendBuffer.get( this.nextReliableMessageNumber.get() ) == null ) {
-            EncapsulatedPacket packet = this.sendBuffer.poll();
+            EncapsulatedPacket packet = this.sendBuffer.peek();
             if ( packet == null ) {
+                this.sendBuffer.poll();
                 continue;
             }
+
+            // Check for max transmission limit
+            currentSendBytes += packet.getHeaderLength() + packet.getPacketLength();
+            if ( currentSendBytes > maxTransmission ) {
+                break;
+            }
+
+            packet = this.sendBuffer.poll();
 
             // Add message numbers
             PacketReliability reliability = packet.getReliability();
@@ -692,6 +720,8 @@ public abstract class Connection {
                     reliability == PacketReliability.RELIABLE_SEQUENCED ||
                     reliability == PacketReliability.RELIABLE_ORDERED ) {
                 packet.setReliableMessageNumber( this.nextReliableMessageNumber.getAndIncrement() );
+
+                this.unackedBytes += packet.getHeaderLength() + packet.getPacketLength();
 
                 // Insert into resend queue:
                 packet.setNextExecution( Long.MAX_VALUE ); // When we did not hear from the packet in 10 seconds we have a problem
@@ -719,6 +749,8 @@ public abstract class Connection {
 
             DatagramContentNode dcn = null;
             for ( EncapsulatedPacket encapsulatedPacket : sendList ) {
+                this.getImplementationLogger().debug( "Adding {} to packet {}", nextDiaNumber, encapsulatedPacket.getReliableMessageNumber() );
+
                 // Add this packet to the datagram content buffer if reliable:
                 if ( encapsulatedPacket.getReliability() != PacketReliability.UNRELIABLE && encapsulatedPacket.getReliability() != PacketReliability.UNRELIABLE_SEQUENCED ) {
                     if ( dcn == null ) {
@@ -780,6 +812,11 @@ public abstract class Connection {
         this.sendPacketQueued( time );
 
         this.postUpdate( time );
+
+        // Reset sliding window if there is one
+        if ( this.slidingWindow != null ) {
+            this.slidingWindow.onTickFinish();
+        }
 
         if ( this.state == ConnectionState.DISCONNECTING && this.sendBuffer.isEmpty() ) {
             // Check if we can perform a clean disconnect now:
@@ -877,6 +914,10 @@ public abstract class Connection {
             return;
         }
 
+        if ( this.slidingWindow != null ) {
+            this.slidingWindow.onACK();
+        }
+
         for ( TriadRange range : ranges ) {
             for ( int j = range.getMin(); j <= range.getMax(); ++j ) {
                 // Remove all packets contained in the ACKed datagram from the resend buffer:
@@ -891,6 +932,7 @@ public abstract class Connection {
                         this.getImplementationLogger().debug( "Removing packet {} due to client ACK", node.getReliableMessageNumber() );
 
                         this.packetsACKed++;
+                        this.unackedBytes -= packet.getHeaderLength() + packet.getPacketLength();
 
                         // Track RTT
                         int currentRTT = (int) ( this.lastReceivedPacket - packet.getSendTime() );
@@ -911,6 +953,10 @@ public abstract class Connection {
         TriadRange[] ranges = buffer.readTriadRangeList();
         if ( ranges == null ) {
             return;
+        }
+
+        if ( this.slidingWindow != null ) {
+            this.slidingWindow.onNAK();
         }
 
         for ( TriadRange range : ranges ) {
