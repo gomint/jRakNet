@@ -1,8 +1,5 @@
 package io.gomint.jraknet;
 
-import java.util.HashSet;
-import java.util.Set;
-
 import static io.gomint.jraknet.RakNetConstraints.NUM_ORDERING_CHANNELS;
 
 /**

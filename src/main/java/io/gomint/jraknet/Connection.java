@@ -659,8 +659,6 @@ public abstract class Connection {
         int currentDatagramSize = 0;
 
         // Resend everything scheduled for resend:
-        int limit = 16;
-
         if ( !this.resendQueue.isEmpty() ) {
             Iterator<EncapsulatedPacket> resendIterator = this.resendQueue.iterator();
             while ( resendIterator.hasNext() ) {
@@ -669,10 +667,10 @@ public abstract class Connection {
 
                 if ( packet.getNextExecution() == 0L ) {
                     resendIterator.remove();
-                } else if ( packet.getNextExecution() <= time && --limit > 0 ) {
+                } else if ( packet.getNextExecution() <= time ) {
                     currentDatagramSize = this.pushPacket( sendList, packet, currentDatagramSize, time );
 
-                    packet.setNextExecution( time + getResendTime( packet ) ); // Default Raknet uses a scaling from 100ms to 10 seconds for this
+                    packet.setNextExecution( Long.MAX_VALUE ); // MC:PE iterates over all packets in pipe it seems and acks one per tick
                     packet.incrementSendCount();
 
                     this.getImplementationLogger().debug( "Resending packet due to client not acking it: {}", packet.getReliableMessageNumber() );
@@ -696,7 +694,7 @@ public abstract class Connection {
                 packet.setReliableMessageNumber( this.nextReliableMessageNumber.getAndIncrement() );
 
                 // Insert into resend queue:
-                packet.setNextExecution( time + CONNECTION_TIMEOUT_MILLIS ); // When we did not hear from the packet in 10 seconds we have a problem
+                packet.setNextExecution( Long.MAX_VALUE ); // When we did not hear from the packet in 10 seconds we have a problem
                 this.resendQueue.add( packet );
 
                 // Add to FixedSize round-robin resend buffer:
@@ -889,8 +887,8 @@ public abstract class Connection {
                     if ( packet != null ) {
                         // Enforce deletion on next interaction:
                         packet.setNextExecution( 0L );
+                        this.resendBuffer.remove( packet.getReliableMessageNumber() );
                         this.getImplementationLogger().debug( "Removing packet {} due to client ACK", node.getReliableMessageNumber() );
-                        this.resendBuffer.remove( node.getReliableMessageNumber() );
 
                         this.packetsACKed++;
 
