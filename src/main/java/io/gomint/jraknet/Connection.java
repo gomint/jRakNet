@@ -94,12 +94,14 @@ public abstract class Connection {
     // Congestion control
     private SlidingWindow slidingWindow;
     private AtomicInteger unackedBytes = new AtomicInteger( 0 );
+    private long lastZeroByteTime;
 
     // ================================ CONSTRUCTORS ================================ //
 
     Connection( InetSocketAddress address, ConnectionState initialState ) {
         this.address = address;
         this.state = initialState;
+        this.lastZeroByteTime = System.currentTimeMillis();
         this.reset();
         this.initUpdater();
     }
@@ -464,6 +466,10 @@ public abstract class Connection {
                         this.packetsACKed, this.packetsNAKed, this.rtt );
             }
 
+            if ( this.lastZeroByteTime + 2000 < time ) {
+                this.getImplementationLogger().warn( "High ACK time detected. Last full ACK {}, remaining bytes {}", this.lastZeroByteTime, this.unackedBytes.get() );
+            }
+
             this.packetsNAKed = 0;
             this.packetsACKed = 0;
             this.nextPacketLossCheck = time + 1000;
@@ -696,6 +702,8 @@ public abstract class Connection {
 
         // Wait until everything is acked
         if ( this.unackedBytes.get() == 0 ) {
+            this.lastZeroByteTime = time;
+
             // Attempt to send new packets:
             int maxTransmission = this.slidingWindow.getTransmissionBandwidth( this.unackedBytes.get() );
             int currentSendBytes = 0;
@@ -1393,7 +1401,7 @@ public abstract class Connection {
 
     void initUpdater() {
         // Attach to the current event loop
-        this.updater = EventLoops.LOOP_GROUP.scheduleAtFixedRate( () -> {
+        this.updater = EventLoops.LOOP_GROUP.scheduleWithFixedDelay( () -> {
             if ( !update( System.currentTimeMillis() ) ) {
                 notifyRemoval();
             }
