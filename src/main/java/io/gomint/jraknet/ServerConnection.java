@@ -27,6 +27,9 @@ class ServerConnection extends Connection {
 	private AtomicLong bytesSend = new AtomicLong( 0 );
 	private AtomicLong bytesReceived = new AtomicLong( 0 );
 
+	// Some stuff we need for dropped connection handshakes
+	private int firstMTUSeen;
+
 	ServerConnection( ServerSocket server, InetSocketAddress address, ConnectionState initialState ) {
 		super( address, initialState );
 		this.server = server;
@@ -45,6 +48,7 @@ class ServerConnection extends Connection {
 	 */
 	@Override
 	protected void sendRaw( InetSocketAddress recipient, PacketBuffer buffer ) throws IOException {
+		this.getImplementationLogger().debug( "<OUT {}", buffer );
 		this.bytesSend.addAndGet( buffer.getPosition() - buffer.getBufferOffset() );
 		this.server.send( recipient, buffer );
 	}
@@ -161,7 +165,8 @@ class ServerConnection extends Connection {
 
 	private void handlePreConnectionRequest1( InetSocketAddress sender, PacketBuffer datagram ) {
 		if ( this.getState() != ConnectionState.UNCONNECTED ) {
-			// Connection is not in a valid state to handle this packet:
+			this.sendConnectionReply1( sender, this.firstMTUSeen );
+			this.getImplementationLogger().debug( "Could not handle pre connection req 1 due to connection state {}", this.getState().name() );
 			return;
 		}
 
@@ -179,7 +184,7 @@ class ServerConnection extends Connection {
 			return;
 		}
 
-		this.sendConnectionReply1( sender, datagram.getRemaining() + 18 );
+		this.sendConnectionReply1( sender, this.firstMTUSeen = datagram.getRemaining() + 18 );
 	}
 
 	private void handlePreConnectionRequest2( InetSocketAddress sender, PacketBuffer datagram ) {

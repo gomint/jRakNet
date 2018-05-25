@@ -115,6 +115,8 @@ public class ServerSocket extends Socket {
                 PacketBuffer content = new PacketBuffer( packet.content() );
                 InetSocketAddress sender = packet.sender();
 
+                getImplementationLogger().debug( "IN> {}", content );
+
                 if ( !receiveDatagram( sender, content ) ) {
                     // Push datagram to update queue:
                     handleDatagram( sender, content, System.currentTimeMillis() );

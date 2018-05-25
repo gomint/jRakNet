@@ -694,44 +694,51 @@ public abstract class Connection {
             }
         }
 
-        // Attempt to send new packets:
-        int maxTransmission = this.slidingWindow.getTransmissionBandwidth( this.unackedBytes.get() );
-        int currentSendBytes = 0;
+        // Wait until everything is acked
+        if ( this.unackedBytes.get() == 0 ) {
+            // Attempt to send new packets:
+            int maxTransmission = this.slidingWindow.getTransmissionBandwidth( this.unackedBytes.get() );
+            int currentSendBytes = 0;
 
-        this.getImplementationLogger().debug( "Allowed to send {} bytes new data, unacked {} bytes", maxTransmission, this.unackedBytes.get() );
-
-        while ( !this.sendBuffer.isEmpty() && this.resendBuffer.get( this.nextReliableMessageNumber.get() ) == null ) {
-            EncapsulatedPacket packet = this.sendBuffer.poll();
-            if ( packet == null ) {
-                continue;
+            if ( !this.sendBuffer.isEmpty() ) {
+                this.getImplementationLogger().debug( "Allowed to send {} bytes new data, unacked {} bytes", maxTransmission, this.unackedBytes.get() );
             }
 
-            // Check for max transmission limit
-            currentSendBytes += packet.getHeaderLength() + packet.getPacketLength();
-            if ( currentSendBytes > maxTransmission ) {
-                this.sendBuffer.offerFirst( packet );
-                this.getImplementationLogger().debug( "Stopped sending new data due to limit {} > {}", currentSendBytes, maxTransmission );
-                break;
+            while ( !this.sendBuffer.isEmpty() && this.resendBuffer.get( this.nextReliableMessageNumber.get() ) == null ) {
+                EncapsulatedPacket packet = this.sendBuffer.poll();
+                if ( packet == null ) {
+                    continue;
+                }
+
+                // Check for max transmission limit
+                currentSendBytes += packet.getHeaderLength() + packet.getPacketLength();
+                if ( currentSendBytes > maxTransmission ) {
+                    this.sendBuffer.offerFirst( packet );
+                    this.getImplementationLogger().debug( "Stopped sending new data due to limit {} > {}", currentSendBytes, maxTransmission );
+                    break;
+                }
+
+                // Add message numbers
+                PacketReliability reliability = packet.getReliability();
+                if ( reliability == PacketReliability.RELIABLE ||
+                        reliability == PacketReliability.RELIABLE_SEQUENCED ||
+                        reliability == PacketReliability.RELIABLE_ORDERED ) {
+                    packet.setReliableMessageNumber( this.nextReliableMessageNumber.getAndIncrement() );
+
+                    this.unackedBytes.addAndGet( packet.getHeaderLength() + packet.getPacketLength() );
+
+                    // Insert into resend queue:
+                    packet.setNextExecution( time + getResendTime( packet ) ); // When we did not hear from the packet in 10 seconds we have a problem
+                    this.resendQueue.add( packet );
+
+                    // Add to FixedSize round-robin resend buffer:
+                    this.resendBuffer.set( packet.getReliableMessageNumber(), packet );
+                }
+
+                currentDatagramSize = this.pushPacket( sendList, packet, currentDatagramSize, time );
             }
-
-            // Add message numbers
-            PacketReliability reliability = packet.getReliability();
-            if ( reliability == PacketReliability.RELIABLE ||
-                    reliability == PacketReliability.RELIABLE_SEQUENCED ||
-                    reliability == PacketReliability.RELIABLE_ORDERED ) {
-                packet.setReliableMessageNumber( this.nextReliableMessageNumber.getAndIncrement() );
-
-                this.unackedBytes.addAndGet( packet.getHeaderLength() + packet.getPacketLength() );
-
-                // Insert into resend queue:
-                packet.setNextExecution( Long.MAX_VALUE ); // When we did not hear from the packet in 10 seconds we have a problem
-                this.resendQueue.add( packet );
-
-                // Add to FixedSize round-robin resend buffer:
-                this.resendBuffer.set( packet.getReliableMessageNumber(), packet );
-            }
-
-            currentDatagramSize = this.pushPacket( sendList, packet, currentDatagramSize, time );
+        } else {
+            this.getImplementationLogger().debug( "Having unacked {} bytes", unackedBytes );
         }
 
         // Push the final datagram if any is to be pushed:
@@ -1113,6 +1120,8 @@ public abstract class Connection {
 
         // NAK all datagrams missing in between:
         if ( skippedMessageCount > 0 ) {
+            this.getImplementationLogger().debug( "Sending NAK for {} skipped messages", skippedMessageCount );
+
             this.sendingNAKsLock.lock();
             try {
                 this.outgoingNAKs.add( new TriadRange( datagramSequenceNumber - skippedMessageCount, datagramSequenceNumber ) );
@@ -1358,7 +1367,7 @@ public abstract class Connection {
         PacketBuffer buffer = new PacketBuffer( 9 );
         buffer.writeByte( CONNECTED_PING );
         buffer.writeLong( time );
-        this.send( PacketReliability.UNRELIABLE, 0, buffer.getBuffer() );
+        this.send( PacketReliability.RELIABLE, 0, buffer.getBuffer() );
         this.currentPingTime = time;
     }
 
@@ -1367,7 +1376,7 @@ public abstract class Connection {
         buffer.writeByte( CONNECTED_PONG );
         buffer.writeLong( pingTime );
         buffer.writeLong( System.currentTimeMillis() );
-        this.send( PacketReliability.UNRELIABLE, buffer.getBuffer() );
+        this.send( PacketReliability.RELIABLE, buffer.getBuffer() );
     }
 
     private void sendDisconnectionNotification() {
