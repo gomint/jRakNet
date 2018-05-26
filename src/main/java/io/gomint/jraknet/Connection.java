@@ -94,14 +94,12 @@ public abstract class Connection {
     // Congestion control
     private SlidingWindow slidingWindow;
     private AtomicInteger unackedBytes = new AtomicInteger( 0 );
-    private long lastZeroByteTime;
 
     // ================================ CONSTRUCTORS ================================ //
 
     Connection( InetSocketAddress address, ConnectionState initialState ) {
         this.address = address;
         this.state = initialState;
-        this.lastZeroByteTime = System.currentTimeMillis();
         this.reset();
         this.initUpdater();
     }
@@ -466,10 +464,6 @@ public abstract class Connection {
                         this.packetsACKed, this.packetsNAKed, this.rtt );
             }
 
-            if ( this.lastZeroByteTime + 2000 < time ) {
-                this.getImplementationLogger().warn( "High ACK time detected. Last full ACK {}, remaining bytes {}", this.lastZeroByteTime, this.unackedBytes.get() );
-            }
-
             this.packetsNAKed = 0;
             this.packetsACKed = 0;
             this.nextPacketLossCheck = time + 1000;
@@ -690,7 +684,7 @@ public abstract class Connection {
                             onResendCalled = true;
                         }
 
-                        packet.setNextExecution( time + getResendTime( packet ) );
+                        packet.setNextExecution( time + this.slidingWindow.getRTOForRetransmission( packet.getSendCount() ) );
                         packet.incrementSendCount();
 
                         this.getImplementationLogger().debug( "Resending packet due to client not acking it: {}", packet.getReliableMessageNumber() );
@@ -700,53 +694,46 @@ public abstract class Connection {
             }
         }
 
-        // Wait until everything is acked
-        if ( this.unackedBytes.get() == 0 ) {
-            this.lastZeroByteTime = time;
+        // Attempt to send new packets:
+        int maxTransmission = this.slidingWindow.getTransmissionBandwidth( this.unackedBytes.get() );
+        int currentSendBytes = 0;
 
-            // Attempt to send new packets:
-            int maxTransmission = this.slidingWindow.getTransmissionBandwidth( this.unackedBytes.get() );
-            int currentSendBytes = 0;
+        if ( !this.sendBuffer.isEmpty() ) {
+            this.getImplementationLogger().debug( "Allowed to send {} bytes new data, unacked {} bytes", maxTransmission, this.unackedBytes.get() );
+        }
 
-            if ( !this.sendBuffer.isEmpty() ) {
-                this.getImplementationLogger().debug( "Allowed to send {} bytes new data, unacked {} bytes", maxTransmission, this.unackedBytes.get() );
+        while ( !this.sendBuffer.isEmpty() && this.resendBuffer.get( this.nextReliableMessageNumber.get() ) == null ) {
+            EncapsulatedPacket packet = this.sendBuffer.poll();
+            if ( packet == null ) {
+                continue;
             }
 
-            while ( !this.sendBuffer.isEmpty() && this.resendBuffer.get( this.nextReliableMessageNumber.get() ) == null ) {
-                EncapsulatedPacket packet = this.sendBuffer.poll();
-                if ( packet == null ) {
-                    continue;
-                }
-
-                // Check for max transmission limit
-                currentSendBytes += packet.getHeaderLength() + packet.getPacketLength();
-                if ( currentSendBytes > maxTransmission ) {
-                    this.sendBuffer.offerFirst( packet );
-                    this.getImplementationLogger().debug( "Stopped sending new data due to limit {} > {}", currentSendBytes, maxTransmission );
-                    break;
-                }
-
-                // Add message numbers
-                PacketReliability reliability = packet.getReliability();
-                if ( reliability == PacketReliability.RELIABLE ||
-                        reliability == PacketReliability.RELIABLE_SEQUENCED ||
-                        reliability == PacketReliability.RELIABLE_ORDERED ) {
-                    packet.setReliableMessageNumber( this.nextReliableMessageNumber.getAndIncrement() );
-
-                    this.unackedBytes.addAndGet( packet.getHeaderLength() + packet.getPacketLength() );
-
-                    // Insert into resend queue:
-                    packet.setNextExecution( time + getResendTime( packet ) ); // When we did not hear from the packet in 10 seconds we have a problem
-                    this.resendQueue.add( packet );
-
-                    // Add to FixedSize round-robin resend buffer:
-                    this.resendBuffer.set( packet.getReliableMessageNumber(), packet );
-                }
-
-                currentDatagramSize = this.pushPacket( sendList, packet, currentDatagramSize, time );
+            // Check for max transmission limit
+            currentSendBytes += packet.getHeaderLength() + packet.getPacketLength();
+            if ( currentSendBytes > maxTransmission ) {
+                this.sendBuffer.offerFirst( packet );
+                this.getImplementationLogger().debug( "Stopped sending new data due to limit {} > {}", currentSendBytes, maxTransmission );
+                break;
             }
-        } else {
-            this.getImplementationLogger().debug( "Having unacked {} bytes", unackedBytes );
+
+            // Add message numbers
+            PacketReliability reliability = packet.getReliability();
+            if ( reliability == PacketReliability.RELIABLE ||
+                    reliability == PacketReliability.RELIABLE_SEQUENCED ||
+                    reliability == PacketReliability.RELIABLE_ORDERED ) {
+                packet.setReliableMessageNumber( this.nextReliableMessageNumber.getAndIncrement() );
+
+                this.unackedBytes.addAndGet( packet.getHeaderLength() + packet.getPacketLength() );
+
+                // Insert into resend queue:
+                packet.setNextExecution( time + this.slidingWindow.getRTOForRetransmission( packet.getSendCount() ) ); // When we did not hear from the packet in 10 seconds we have a problem
+                this.resendQueue.add( packet );
+
+                // Add to FixedSize round-robin resend buffer:
+                this.resendBuffer.set( packet.getReliableMessageNumber(), packet );
+            }
+
+            currentDatagramSize = this.pushPacket( sendList, packet, currentDatagramSize, time );
         }
 
         // Push the final datagram if any is to be pushed:
@@ -788,20 +775,6 @@ public abstract class Connection {
                 this.getImplementationLogger().error( "Failed to send datagram to destination", e );
             }
         }
-    }
-
-    private long getResendTime( EncapsulatedPacket packet ) {
-        int max = 10000;
-        int min = 100;
-
-        int should;
-        if ( this.rtt > 0 ) {
-            should = this.rtt * 2;
-        } else {
-            should = ( packet.getSendCount() + 1 ) * min;
-        }
-
-        return Math.max( Math.min( should, max ), min );
     }
 
     /**
@@ -882,7 +855,7 @@ public abstract class Connection {
         this.lastReceivedPacket = time;
 
         if ( !this.handleDatagram0( sender, datagram, time ) ) {
-            this.handleConnectedDatagram( sender, datagram );
+            this.handleConnectedDatagram( sender, datagram, time );
         }
     }
 
@@ -923,14 +896,10 @@ public abstract class Connection {
 
     // ================================ ACKs AND NAKs ================================ //
 
-    private void handleACKs( PacketBuffer buffer ) {
+    private void handleACKs( PacketBuffer buffer, long time ) {
         TriadRange[] ranges = buffer.readTriadRangeList();
         if ( ranges == null ) {
             return;
-        }
-
-        if ( this.slidingWindow != null ) {
-            this.slidingWindow.onACK();
         }
 
         for ( TriadRange range : ranges ) {
@@ -941,6 +910,10 @@ public abstract class Connection {
                 while ( node != null ) {
                     EncapsulatedPacket packet = this.resendBuffer.get( node.getReliableMessageNumber() );
                     if ( packet != null ) {
+                        if ( this.slidingWindow != null ) {
+                            this.slidingWindow.onACK( time - packet.getSendTime() );
+                        }
+
                         // Enforce deletion on next interaction:
                         packet.setNextExecution( 0L );
                         this.resendBuffer.remove( packet.getReliableMessageNumber() );
@@ -1081,7 +1054,7 @@ public abstract class Connection {
 
     // ================================ PACKET HANDLERS ================================ //
 
-    private void handleConnectedDatagram( InetSocketAddress sender, PacketBuffer buffer ) {
+    private void handleConnectedDatagram( InetSocketAddress sender, PacketBuffer buffer, long time ) {
         if ( !this.state.isReliable() ) {
             // This connection is not reliable --> internal structures might not have been initialized
             return;
@@ -1099,7 +1072,7 @@ public abstract class Connection {
         boolean isACK = ( flags & 0x40 ) != 0;
         if ( isACK ) {
             // This datagram only contains ACKs --> Handle separately
-            this.handleACKs( buffer );
+            this.handleACKs( buffer, time );
             return;
         }
 

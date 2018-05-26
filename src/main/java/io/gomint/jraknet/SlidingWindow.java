@@ -10,10 +10,16 @@ import org.slf4j.LoggerFactory;
 public class SlidingWindow {
 
     private static final Logger LOGGER = LoggerFactory.getLogger( SlidingWindow.class );
+    private static final int MAX_THRESHOLD = 2000;
+    private static final int ADDITIONAL_VARIANCE = 30;
 
     private final int maxMTU;
     private int threshold;
     private int cwnd;
+
+    private double lastRTT;
+    private double estimatedRTT = -1;
+    private double deviationRTT = -1;
 
     private boolean ackAlreadyTicked;
     private boolean nakAlreadyTicked;
@@ -41,12 +47,25 @@ public class SlidingWindow {
         this.threshold = this.cwnd / 2;
     }
 
-    public void onACK() {
+    public void onACK( double rtt ) {
         if ( this.ackAlreadyTicked ) {
             return;
         }
 
         this.ackAlreadyTicked = true;
+
+
+        this.lastRTT = rtt;
+        if ( this.estimatedRTT == -1 ) {
+            this.estimatedRTT = rtt;
+            this.deviationRTT = rtt;
+        } else {
+            double d = .05;
+            double difference = rtt - this.estimatedRTT;
+            this.estimatedRTT = this.estimatedRTT + d * difference;
+            this.deviationRTT = this.deviationRTT + d * ( Math.abs( difference ) - this.deviationRTT );
+        }
+
         if ( this.isInSlowStart() ) {
             this.cwnd += this.maxMTU;
             if ( this.cwnd > this.threshold && this.threshold != 0 ) {
@@ -58,6 +77,23 @@ public class SlidingWindow {
             this.cwnd += this.maxMTU * this.maxMTU / this.cwnd;
             LOGGER.debug( "Bandwidth increase: {}", this.cwnd );
         }
+    }
+
+    public long getRTOForRetransmission( int timesSent ) {
+        if ( this.estimatedRTT == -1 ) {
+            return MAX_THRESHOLD;
+        }
+
+        double u = 2.0;
+        double q = 4.0;
+
+        long threshhold = (long) ( u * this.estimatedRTT + q * this.deviationRTT ) + ADDITIONAL_VARIANCE;
+        if ( threshhold > MAX_THRESHOLD ) {
+            return MAX_THRESHOLD;
+        }
+
+        LOGGER.debug( "Resending with " + threshhold + " ms delay" );
+        return threshhold;
     }
 
     public void onTickFinish() {
