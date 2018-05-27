@@ -71,6 +71,9 @@ public abstract class Socket implements AutoCloseable {
      */
     @Override
     public void close() {
+        // Stop all threads safely:
+        this.running.set( false );
+
         // Close the UDP socket:
         this.channel.close();
         this.channel = null;
@@ -111,6 +114,33 @@ public abstract class Socket implements AutoCloseable {
     // ================================ INTERNALS ================================ //
 
     /**
+     * Updates all connections this socket created.
+     *
+     * @param time The current system time
+     */
+    protected abstract void updateConnections( long time );
+
+    /**
+     * Invoked after the update thread was stopped but right before it terminates. May perform any necessary
+     * cleanup.
+     */
+    protected void cleanupUpdateThread() {
+
+    }
+
+    /**
+     * Must be invoked by the implementation right after the socket's internal datagram socket
+     * was initialized. This will initialize all internal structures and start up the socket's
+     * receive and update threads.
+     */
+    protected final void afterInitialize() {
+        // Initialize other subsystems; won't get here if bind fails as DatagramSocket's
+        // constructor will throw SocketException:
+        this.running.set( true );
+        this.startUpdateThread();
+    }
+
+    /**
      * Generates a new GUID for this socket. Must be invoked with care as incoming connections could
      * potentially receive different GUIDs for the same server if this method is invoked if there
      * are connections that have already been established.
@@ -128,6 +158,24 @@ public abstract class Socket implements AutoCloseable {
         if ( this.eventHandler != null ) {
             this.eventHandler.onSocketEvent( this, event );
         }
+    }
+
+    /**
+     * Starts the thread that will continuously update all currently connected player's
+     * connections.
+     */
+    private void startUpdateThread() {
+        this.channel.eventLoop().scheduleAtFixedRate( new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    // Update all connections:
+                    updateConnections( System.currentTimeMillis() );
+                } catch ( Throwable t ) {
+                    Socket.this.getImplementationLogger().error( "Exception in updating connections", t );
+                }
+            }
+        }, 0, 10, TimeUnit.MILLISECONDS );
     }
 
 }

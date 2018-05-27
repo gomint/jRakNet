@@ -42,23 +42,6 @@ class ClientConnection extends Connection {
 	}
 
 	@Override
-	boolean update( long time ) {
-		if ( this.getLastReceivedPacketTime() + CONNECTION_TIMEOUT_MILLIS < time ) {
-			this.notifyTimeout();
-			return false;
-		}
-
-		return super.update( time );
-	}
-
-	@Override
-	void notifyRemoval() {
-		this.client.removeConnection();
-
-		super.notifyRemoval();
-	}
-
-	@Override
 	protected void preUpdate( long time ) {
 		super.preUpdate( time );
 

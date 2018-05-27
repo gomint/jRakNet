@@ -6,8 +6,6 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.epoll.Epoll;
 import io.netty.channel.epoll.EpollDatagramChannel;
-import io.netty.channel.epoll.EpollEventLoopGroup;
-import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.DatagramPacket;
 import io.netty.channel.socket.nio.NioDatagramChannel;
 import io.netty.util.internal.ThreadLocalRandom;
@@ -99,6 +97,8 @@ public class ClientSocket extends Socket {
             exception.initCause( e );
             throw exception;
         }
+
+        this.afterInitialize();
     }
 
     /**
@@ -228,6 +228,39 @@ public class ClientSocket extends Socket {
     // ================================ INTERNALS ================================ //
 
     /**
+     * Updates all connections this socket created.
+     *
+     * @param time The current system time
+     */
+    @Override
+    protected void updateConnections( long time ) {
+        if ( this.connection != null ) {
+            if ( this.connection.getLastReceivedPacketTime() + CONNECTION_TIMEOUT_MILLIS < time ) {
+                this.connection.notifyTimeout();
+                this.connection = null;
+            } else {
+                if ( !this.connection.update( time ) ) {
+                    this.connection = null;
+                }
+            }
+        }
+    }
+
+    /**
+     * Invoked after the update thread was stopped but right before it terminates. May perform any necessary
+     * cleanup.
+     */
+    @Override
+    protected void cleanupUpdateThread() {
+        // long time = System.currentTimeMillis();
+        if ( this.connection != null ) {
+            this.connection.disconnect( "Socket is closing" );
+            // this.connection.update( time );
+        }
+        this.connection = null;
+    }
+
+    /**
      * Sends the given data to the specified recipient immediately, i.e. without caching nor any form of
      * transmission control (reliability, resending, etc.)
      *
@@ -336,10 +369,6 @@ public class ClientSocket extends Socket {
                 serverGuid,
                 motd );
         this.propagateEvent( new SocketEvent( SocketEvent.Type.UNCONNECTED_PONG, info ) );
-    }
-
-    public void removeConnection() {
-        this.connection = null;
     }
 
 }
