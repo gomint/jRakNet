@@ -48,7 +48,7 @@ class ServerConnection extends Connection {
 	 */
 	@Override
 	protected void sendRaw( InetSocketAddress recipient, PacketBuffer buffer ) throws IOException {
-		this.getImplementationLogger().debug( "<OUT {}", buffer );
+		this.getImplementationLogger().trace( "<OUT {}", buffer );
 		this.bytesSend.addAndGet( buffer.getPosition() - buffer.getBufferOffset() );
 		this.server.send( recipient, buffer );
 	}
@@ -372,7 +372,7 @@ class ServerConnection extends Connection {
 		if ( this.lastTrafficStats + 1000L < time ) {
 			this.lastTrafficStats = time;
 
-			this.getImplementationLogger().debug( "Traffic stats: {} bytes tx {} bytes rx", this.bytesSend.getAndSet( 0 ), this.bytesReceived.getAndSet( 0 ) );
+			this.getImplementationLogger().trace( "Traffic stats: {} bytes tx {} bytes rx", this.bytesSend.getAndSet( 0 ), this.bytesReceived.getAndSet( 0 ) );
 		}
 	}
 }

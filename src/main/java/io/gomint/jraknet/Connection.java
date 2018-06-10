@@ -622,7 +622,7 @@ public abstract class Connection {
 
             DatagramContentNode dcn = null;
             for ( EncapsulatedPacket encapsulatedPacket : sendList ) {
-                this.getImplementationLogger().debug( "Adding {} to packet {}", nextDiaNumber, encapsulatedPacket.getReliableMessageNumber() );
+                this.getImplementationLogger().trace( "Adding {} to packet {}", nextDiaNumber, encapsulatedPacket.getReliableMessageNumber() );
 
                 // Add this packet to the datagram content buffer if reliable:
                 if ( encapsulatedPacket.getReliability() != PacketReliability.UNRELIABLE && encapsulatedPacket.getReliability() != PacketReliability.UNRELIABLE_SEQUENCED ) {
@@ -683,7 +683,7 @@ public abstract class Connection {
                         packet.setNextExecution( time + this.slidingWindow.getRTOForRetransmission( packet.getSendCount() ) );
                         packet.incrementSendCount();
 
-                        this.getImplementationLogger().debug( "Resending packet due to client not acking it: {}", packet.getReliableMessageNumber() );
+                        this.getImplementationLogger().trace( "Resending packet due to client not acking it: {}", packet.getReliableMessageNumber() );
                         this.packetsNAKed++; // We tread this as NAK
                     }
                 }
@@ -695,7 +695,7 @@ public abstract class Connection {
         int currentSendBytes = 0;
 
         if ( !this.sendBuffer.isEmpty() ) {
-            this.getImplementationLogger().debug( "Allowed to send {} bytes new data, unacked {} bytes", maxTransmission, this.unackedBytes.get() );
+            this.getImplementationLogger().trace( "Allowed to send {} bytes new data, unacked {} bytes", maxTransmission, this.unackedBytes.get() );
         }
 
         while ( !this.sendBuffer.isEmpty() && this.resendBuffer.get( this.nextReliableMessageNumber.get() ) == null ) {
@@ -708,7 +708,7 @@ public abstract class Connection {
             currentSendBytes += packet.getHeaderLength() + packet.getPacketLength();
             if ( currentSendBytes > maxTransmission ) {
                 this.sendBuffer.offerFirst( packet );
-                this.getImplementationLogger().debug( "Stopped sending new data due to limit {} > {}", currentSendBytes, maxTransmission );
+                this.getImplementationLogger().trace( "Stopped sending new data due to limit {} > {}", currentSendBytes, maxTransmission );
                 break;
             }
 
@@ -747,7 +747,7 @@ public abstract class Connection {
 
             DatagramContentNode dcn = null;
             for ( EncapsulatedPacket encapsulatedPacket : sendList ) {
-                this.getImplementationLogger().debug( "Adding {} to packet {}", nextDiaNumber, encapsulatedPacket.getReliableMessageNumber() );
+                this.getImplementationLogger().trace( "Adding {} to packet {}", nextDiaNumber, encapsulatedPacket.getReliableMessageNumber() );
 
                 // Add this packet to the datagram content buffer if reliable:
                 if ( encapsulatedPacket.getReliability() != PacketReliability.UNRELIABLE && encapsulatedPacket.getReliability() != PacketReliability.UNRELIABLE_SEQUENCED ) {
@@ -902,7 +902,7 @@ public abstract class Connection {
             for ( int j = range.getMin(); j <= range.getMax(); ++j ) {
                 // Remove all packets contained in the ACKed datagram from the resend buffer:
                 DatagramContentNode node = this.datagramContentBuffer.get( j );
-                this.getImplementationLogger().debug( "Got datagram number to ack: {}", j );
+                this.getImplementationLogger().trace( "Got datagram number to ack: {}", j );
                 while ( node != null ) {
                     EncapsulatedPacket packet = this.resendBuffer.get( node.getReliableMessageNumber() );
                     if ( packet != null ) {
@@ -917,7 +917,7 @@ public abstract class Connection {
                         this.packetsACKed++;
                         this.unackedBytes.addAndGet( -( packet.getHeaderLength() + packet.getPacketLength() ) );
 
-                        this.getImplementationLogger().debug( "Removing packet {} due to client ACK - remaining unacked bytes: {}", node.getReliableMessageNumber(), this.unackedBytes );
+                        this.getImplementationLogger().trace( "Removing packet {} due to client ACK - remaining unacked bytes: {}", node.getReliableMessageNumber(), this.unackedBytes );
 
                         // Track RTT
                         int currentRTT = (int) ( this.lastReceivedPacket - packet.getSendTime() );
@@ -949,18 +949,18 @@ public abstract class Connection {
                 // Enforce immediate resend:
                 DatagramContentNode node = this.datagramContentBuffer.get( j );
                 if ( node == null ) {
-                    this.getImplementationLogger().debug( "Wanted to NAK but datagram is not there anymore: {}", j );
+                    this.getImplementationLogger().trace( "Wanted to NAK but datagram is not there anymore: {}", j );
                 }
 
                 while ( node != null ) {
                     EncapsulatedPacket packet = this.resendBuffer.get( node.getReliableMessageNumber() );
                     if ( packet != null ) {
-                        this.getImplementationLogger().debug( "Force sending NAKed Packet: {}", packet.getReliableMessageNumber() );
+                        this.getImplementationLogger().trace( "Force sending NAKed Packet: {}", packet.getReliableMessageNumber() );
 
                         // Enforce instant resend on next interaction:
                         packet.setNextExecution( 1L );
                     } else {
-                        this.getImplementationLogger().debug( "Wanted for resend Packet {} but its not there anymore", node.getReliableMessageNumber() );
+                        this.getImplementationLogger().trace( "Wanted for resend Packet {} but its not there anymore", node.getReliableMessageNumber() );
                     }
 
                     node = node.getNext();
@@ -1097,7 +1097,7 @@ public abstract class Connection {
 
         // NAK all datagrams missing in between:
         if ( skippedMessageCount > 0 ) {
-            this.getImplementationLogger().debug( "Sending NAK for {} skipped messages", skippedMessageCount );
+            this.getImplementationLogger().trace( "Sending NAK for {} skipped messages", skippedMessageCount );
 
             this.sendingNAKsLock.lock();
             try {

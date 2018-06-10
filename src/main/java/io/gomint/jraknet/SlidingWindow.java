@@ -72,10 +72,10 @@ public class SlidingWindow {
                 this.cwnd = this.threshold + this.maxMTU * this.maxMTU / this.cwnd;
             }
 
-            LOGGER.debug( "Slow start bandwidth increase: {} / {}", this.cwnd, this.threshold );
+            LOGGER.trace( "Slow start bandwidth increase: {} / {}", this.cwnd, this.threshold );
         } else {
             this.cwnd += this.maxMTU * this.maxMTU / this.cwnd;
-            LOGGER.debug( "Bandwidth increase: {}", this.cwnd );
+            LOGGER.trace( "Bandwidth increase: {}", this.cwnd );
         }
     }
 
@@ -92,7 +92,7 @@ public class SlidingWindow {
             return MAX_THRESHOLD;
         }
 
-        LOGGER.debug( "Resending with " + threshhold + " ms delay" );
+        LOGGER.trace( "Resending with {} ms delay", threshhold );
         return threshhold;
     }
 
