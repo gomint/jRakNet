@@ -9,7 +9,7 @@ public class RakNetConstraints {
 	// =========================== CONSTANTS =========================== //
 
 	// Version of the RakNet library's protocol MCPE is using
-	public static final byte RAKNET_PROTOCOL_VERSION_MOJANG = 8;
+	public static final byte RAKNET_PROTOCOL_VERSION_MOJANG = 9;
 
 	// Version of the original RakNet lib without modifications
 	public static final byte RAKNET_PROTOCOL_VERSION = 6;
