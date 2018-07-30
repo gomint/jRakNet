@@ -17,7 +17,9 @@ import java.net.InetSocketAddress;
 import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
 
-import static io.gomint.jraknet.RakNetConstraints.*;
+import static io.gomint.jraknet.RakNetConstraints.UNCONNECTED_PING;
+import static io.gomint.jraknet.RakNetConstraints.UNCONNECTED_PONG;
+import static io.gomint.jraknet.RakNetConstraints.UNCONNECTED_PONG_MOJANG;
 
 /**
  * @author BlackyPaw
@@ -97,8 +99,6 @@ public class ClientSocket extends Socket {
             exception.initCause( e );
             throw exception;
         }
-
-        this.afterInitialize();
     }
 
     /**
@@ -228,39 +228,6 @@ public class ClientSocket extends Socket {
     // ================================ INTERNALS ================================ //
 
     /**
-     * Updates all connections this socket created.
-     *
-     * @param time The current system time
-     */
-    @Override
-    protected void updateConnections( long time ) {
-        if ( this.connection != null ) {
-            if ( this.connection.getLastReceivedPacketTime() + CONNECTION_TIMEOUT_MILLIS < time ) {
-                this.connection.notifyTimeout();
-                this.connection = null;
-            } else {
-                if ( !this.connection.update( time ) ) {
-                    this.connection = null;
-                }
-            }
-        }
-    }
-
-    /**
-     * Invoked after the update thread was stopped but right before it terminates. May perform any necessary
-     * cleanup.
-     */
-    @Override
-    protected void cleanupUpdateThread() {
-        // long time = System.currentTimeMillis();
-        if ( this.connection != null ) {
-            this.connection.disconnect( "Socket is closing" );
-            // this.connection.update( time );
-        }
-        this.connection = null;
-    }
-
-    /**
      * Sends the given data to the specified recipient immediately, i.e. without caching nor any form of
      * transmission control (reliability, resending, etc.)
      *
@@ -283,7 +250,9 @@ public class ClientSocket extends Socket {
      * @throws IOException Thrown if the transmission fails
      */
     void send( InetSocketAddress recipient, byte[] buffer, int offset, int length ) throws IOException {
-        this.channel.writeAndFlush( new DatagramPacket( Unpooled.wrappedBuffer( buffer, offset, length ), recipient ) );
+        if ( this.channel != null ) {
+            this.flush( new Flusher.FlushItem( this.channel, new DatagramPacket( Unpooled.wrappedBuffer( buffer, offset, length ), recipient ) ) );
+        }
     }
 
     /**
@@ -369,6 +338,10 @@ public class ClientSocket extends Socket {
                 serverGuid,
                 motd );
         this.propagateEvent( new SocketEvent( SocketEvent.Type.UNCONNECTED_PONG, info ) );
+    }
+
+    public void removeConnection() {
+        this.connection = null;
     }
 
 }

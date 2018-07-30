@@ -12,9 +12,11 @@ import io.netty.channel.nio.NioEventLoopGroup;
 public class EventLoops {
 
     public static EventLoopGroup LOOP_GROUP;
+    public static Flusher FLUSHER;
 
     static {
         EventLoops.LOOP_GROUP = Epoll.isAvailable() ? new EpollEventLoopGroup() : new NioEventLoopGroup();
+        EventLoops.FLUSHER = new Flusher( EventLoops.LOOP_GROUP.next() );
     }
 
 }

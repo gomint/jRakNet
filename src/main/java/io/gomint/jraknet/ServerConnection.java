@@ -143,6 +143,26 @@ class ServerConnection extends Connection {
 
 	// ================================ PACKET HANDLERS ================================ //
 
+	@Override
+	boolean update( long time ) {
+		// Timeout
+		if ( this.getLastReceivedPacketTime() + CONNECTION_TIMEOUT_MILLIS < time ) {
+			this.notifyTimeout();
+			return false;
+		}
+
+		return super.update( time );
+	}
+
+	@Override
+	void notifyRemoval() {
+		if ( hasGuid() ) {
+			this.server.removeConnection( this );
+		}
+
+		super.notifyRemoval();
+	}
+
 	private void handlePreConnectionRequest1( InetSocketAddress sender, PacketBuffer datagram ) {
 		if ( this.getState() != ConnectionState.UNCONNECTED ) {
 			this.sendConnectionReply1( sender, this.firstMTUSeen );
@@ -158,7 +178,7 @@ class ServerConnection extends Connection {
 
 		// Check for correct protocol:
 		if ( ( !server.mojangModificationEnabled && remoteProtocol != RAKNET_PROTOCOL_VERSION  ) ||
-				( server.mojangModificationEnabled && remoteProtocol != RAKNET_PROTOCOL_VERSION_MOJANG ) ) {
+				( server.mojangModificationEnabled && ( remoteProtocol != RAKNET_PROTOCOL_VERSION_MOJANG && remoteProtocol != RAKNET_PROTOCL_VERSION_MOJANG_UNDER_280 ) ) ) {
 			this.sendIncompatibleProtocolVersion();
 			this.setState( ConnectionState.UNCONNECTED );
 			return;

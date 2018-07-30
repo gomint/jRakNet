@@ -88,6 +88,9 @@ public abstract class Connection {
     // Data processors
     private List<Function<EncapsulatedPacket, EncapsulatedPacket>> dataProcessors = new CopyOnWriteArrayList<>();
 
+    // Updater thread
+    private ScheduledFuture<?> updater;
+
     // Congestion control
     private SlidingWindow slidingWindow;
     private AtomicInteger unackedBytes = new AtomicInteger( 0 );
@@ -98,6 +101,7 @@ public abstract class Connection {
         this.address = address;
         this.state = initialState;
         this.reset();
+        this.initUpdater();
     }
 
     // ================================ PUBLIC API ================================ //
@@ -1366,6 +1370,18 @@ public abstract class Connection {
         byte[] data = new byte[1];
         data[0] = DETECT_LOST_CONNECTION;
         this.send( PacketReliability.RELIABLE, 0, data );
+    }
+
+    void initUpdater() {
+        // Attach to the current event loop
+        this.updater = EventLoops.LOOP_GROUP.scheduleWithFixedDelay( () -> {
+            if ( !update( System.currentTimeMillis() ) ) {
+                notifyRemoval();
+            }
+        }, 0, 10, TimeUnit.MILLISECONDS );
+    }
+    void notifyRemoval() {
+        this.updater.cancel( true );
     }
 
 }
