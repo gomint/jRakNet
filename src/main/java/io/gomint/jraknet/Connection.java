@@ -95,6 +95,9 @@ public abstract class Connection {
     private SlidingWindow slidingWindow;
     private AtomicInteger unackedBytes = new AtomicInteger( 0 );
 
+    // Raknet protocol id
+    protected byte protocolVersion;
+
     // ================================ CONSTRUCTORS ================================ //
 
     Connection( InetSocketAddress address, ConnectionState initialState ) {
@@ -153,6 +156,15 @@ public abstract class Connection {
      */
     public ConnectionState getState() {
         return this.state;
+    }
+
+    /**
+     * Get the protocol version this connection uses
+     *
+     * @return protocol of this connection
+     */
+    public byte getProtocolVersion() {
+        return this.protocolVersion;
     }
 
     /**

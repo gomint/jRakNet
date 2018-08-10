@@ -184,6 +184,7 @@ class ServerConnection extends Connection {
 			return;
 		}
 
+		this.protocolVersion = remoteProtocol;
 		this.sendConnectionReply1( sender, this.firstMTUSeen = datagram.getRemaining() + 18 );
 	}
 

@@ -33,6 +33,8 @@ public class ClientSocket extends Socket {
     private ClientConnection connection;
     boolean mojangModificationEnabled;
 
+    private byte protocol = -1;
+
     /**
      * Constructs a new client socket ready for use.
      */
@@ -53,6 +55,13 @@ public class ClientSocket extends Socket {
     }
 
     // ================================ PUBLIC API ================================ //
+
+    /**
+     * Override the protocol version used
+     */
+    public void setProtocolVersion( int protocolVersion ) {
+        this.protocol = (byte) protocolVersion;
+    }
 
     /**
      * Enable mojang modifications to this is compatible with MC:PE
@@ -167,7 +176,7 @@ public class ClientSocket extends Socket {
         }
 
         // Connection will start to send pre-connection requests automatically:
-        this.connection = new ClientConnection( this, address, ConnectionState.INITIALIZING );
+        this.connection = new ClientConnection( this, address, ConnectionState.INITIALIZING, this.protocol );
     }
 
     /**

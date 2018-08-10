@@ -34,11 +34,12 @@ class ClientConnection extends Connection {
     private int connectionAttempts;
     private long lastConnectionAttempt;
 
-    public ClientConnection( ClientSocket client, InetSocketAddress address, ConnectionState initialState ) {
+    public ClientConnection( ClientSocket client, InetSocketAddress address, ConnectionState initialState, byte protocolVersion ) {
         super( address, initialState );
         this.client = client;
         this.connectionAttempts = 0;
         this.lastConnectionAttempt = 0L;
+        this.protocolVersion = protocolVersion != -1 ? protocolVersion : client.mojangModificationEnabled ? RAKNET_PROTOCOL_VERSION_MOJANG : RAKNET_PROTOCOL_VERSION;
     }
 
     // ================================ CONNECTION ================================ //
@@ -233,7 +234,7 @@ class ClientConnection extends Connection {
             buffer.readAddress();                                                               // Server Local IPs
         }
 
-        @SuppressWarnings( "unused" ) long pingTime = buffer.readLong();                        // Ping Time
+        @SuppressWarnings( "unused" ) long pingTime = buffer.readLong();                                             // Ping Time
         long pongTime = buffer.readLong();                                                      // Pong Time
 
         // Send response:
@@ -251,7 +252,7 @@ class ClientConnection extends Connection {
         PacketBuffer buffer = new PacketBuffer( MAXIMUM_MTU_SIZE );
         buffer.writeByte( OPEN_CONNECTION_REQUEST_1 );
         buffer.writeOfflineMessageDataId();
-        buffer.writeByte( client.mojangModificationEnabled ? RAKNET_PROTOCOL_VERSION_MOJANG : RAKNET_PROTOCOL_VERSION );
+        buffer.writeByte( this.protocolVersion );
 
         // Simulate filling with zeroes, in order to "test out" maximum MTU size:
         buffer.skip( mtuSize - 18 );
