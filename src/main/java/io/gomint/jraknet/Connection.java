@@ -1340,7 +1340,10 @@ public abstract class Connection {
     private void handleConnectedPong( @SuppressWarnings( "unused" ) EncapsulatedPacket packet ) {
         PacketBuffer buffer = new PacketBuffer( packet.getPacketData(), 1 );
         long inPacket = buffer.readLong();
-        buffer.readLong();
+
+        if ( buffer.getRemaining() == 8 ) {
+            buffer.readLong();
+        }
 
         if ( inPacket == this.currentPingTime ) {
             this.lastPingTime = this.currentPingTime;

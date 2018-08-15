@@ -312,6 +312,8 @@ public class ClientSocket extends Socket {
         PacketBuffer buffer = new PacketBuffer( 9 );
         buffer.writeByte( UNCONNECTED_PING );
         buffer.writeLong( System.currentTimeMillis() );
+        buffer.writeBytes( RakNetConstraints.OFFLINE_MESSAGE_DATA_ID );
+        buffer.writeLong( this.getGuid() );
 
         try {
             this.send( recipient, buffer );
