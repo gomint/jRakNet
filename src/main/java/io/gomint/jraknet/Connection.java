@@ -252,7 +252,7 @@ public abstract class Connection {
      * @return One single data packet or null if no more packets are available.
      */
     public EncapsulatedPacket receive() {
-        if ( this.receiveBuffer.isEmpty() ) {
+        if ( this.receiveBuffer == null || this.receiveBuffer.isEmpty() ) {
             return null;
         }
 
@@ -270,6 +270,10 @@ public abstract class Connection {
      * @return One single data packet or null if no more packets are available.
      */
     public EncapsulatedPacket poll() {
+        if ( this.receiveBuffer == null ) {
+            return null;
+        }
+
         try {
             while ( this.isConnected() || !this.receiveBuffer.isEmpty() ) {
                 EncapsulatedPacket packet = this.receiveBuffer.poll( 50, TimeUnit.MILLISECONDS );
