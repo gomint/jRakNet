@@ -4,8 +4,13 @@ import io.gomint.jraknet.datastructures.TriadRange;
 import io.netty.buffer.ByteBuf;
 
 import java.math.BigInteger;
-import java.net.*;
+import java.net.Inet4Address;
+import java.net.Inet6Address;
+import java.net.InetSocketAddress;
+import java.net.SocketAddress;
+import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
@@ -585,6 +590,13 @@ public class PacketBuffer {
      */
     public void setPosition( int position ) {
         this.position = position;
+    }
+
+    /**
+     * Shrink the internal byte array to the actual size
+     */
+    public void shrink() {
+        this.buffer = Arrays.copyOf( this.buffer, this.position );
     }
 
     @Override
