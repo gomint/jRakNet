@@ -33,6 +33,7 @@ public abstract class Connection {
     private long guid;
 
     private long lastReceivedPacket;
+    private long connectingStart;
 
     // Congestion Management
     private int expectedReliableMessageNumber;
@@ -458,8 +459,14 @@ public abstract class Connection {
      * @param time The current system time
      */
     protected void preUpdate( long time ) {
+        // Ping when connected
         if ( this.isConnected() && this.currentPingTime + 2000L < time ) {
             this.sendConnectedPing( time );
+        }
+
+        // Check for state change
+        if ( this.isConnecting() && this.connectingStart + 10000L < time ) {
+            this.reset();
         }
     }
 
@@ -554,6 +561,9 @@ public abstract class Connection {
                 break;
             case CONNECTED:
                 this.propagateFullyConnected();
+                break;
+            case INITIALIZING:
+                this.connectingStart = System.currentTimeMillis();
                 break;
         }
     }
