@@ -12,6 +12,7 @@ import static io.gomint.jraknet.RakNetConstraints.CONNECTION_REQUEST_FAILED;
 import static io.gomint.jraknet.RakNetConstraints.CONNECTION_TIMEOUT_MILLIS;
 import static io.gomint.jraknet.RakNetConstraints.MAXIMUM_MTU_SIZE;
 import static io.gomint.jraknet.RakNetConstraints.MAX_LOCAL_IPS;
+import static io.gomint.jraknet.RakNetConstraints.MINIMUM_MTU_SIZE;
 import static io.gomint.jraknet.RakNetConstraints.NEW_INCOMING_CONNECTION;
 import static io.gomint.jraknet.RakNetConstraints.NO_FREE_INCOMING_CONNECTIONS;
 import static io.gomint.jraknet.RakNetConstraints.OPEN_CONNECTION_REPLY_1;
@@ -57,6 +58,7 @@ class ClientConnection extends Connection {
     @Override
     boolean update( long time ) {
         if ( this.getLastReceivedPacketTime() + CONNECTION_TIMEOUT_MILLIS < time ) {
+            this.getImplementationLogger().trace( "Read timed out" );
             this.notifyTimeout();
             return false;
         }
@@ -87,7 +89,14 @@ class ClientConnection extends Connection {
 
         // Send out pre-connection attempts:
         if ( this.lastConnectionAttempt + 1000L < time ) {
-            int mtuSize = ( this.connectionAttempts < 5 ? MAXIMUM_MTU_SIZE : ( this.connectionAttempts < 8 ? 1200 : 576 ) );
+            this.getImplementationLogger().trace( "Trying to connect" );
+
+            int mtuDiff = ( MAXIMUM_MTU_SIZE - MINIMUM_MTU_SIZE ) / 9;
+            int mtuSize = MAXIMUM_MTU_SIZE - ( this.connectionAttempts * mtuDiff );
+            if ( mtuSize < MINIMUM_MTU_SIZE ) {
+                mtuSize = MINIMUM_MTU_SIZE;
+            }
+
             this.sendPreConnectionRequest1( this.getAddress(), mtuSize );
 
             ++this.connectionAttempts;

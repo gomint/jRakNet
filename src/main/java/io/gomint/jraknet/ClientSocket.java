@@ -16,6 +16,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 
 import static io.gomint.jraknet.RakNetConstraints.UNCONNECTED_PING;
 import static io.gomint.jraknet.RakNetConstraints.UNCONNECTED_PONG;
@@ -93,6 +94,8 @@ public class ClientSocket extends Socket {
                 io.netty.channel.socket.DatagramPacket packet = (io.netty.channel.socket.DatagramPacket) msg;
                 PacketBuffer content = new PacketBuffer( packet.content() );
                 InetSocketAddress sender = packet.sender();
+
+                getImplementationLogger().trace( "IN>: {}", Arrays.toString( content.getBuffer() ) );
 
                 if ( !receiveDatagram( sender, content ) ) {
                     // Push datagram to update queue:
@@ -259,6 +262,8 @@ public class ClientSocket extends Socket {
      * @throws IOException Thrown if the transmission fails
      */
     void send( InetSocketAddress recipient, byte[] buffer, int offset, int length ) throws IOException {
+        this.getImplementationLogger().trace( "<OUT: {}", Arrays.toString( buffer ) );
+
         if ( this.channel != null ) {
             this.flush( new Flusher.FlushItem( this.channel, new DatagramPacket( Unpooled.wrappedBuffer( buffer, offset, length ), recipient ) ) );
         }

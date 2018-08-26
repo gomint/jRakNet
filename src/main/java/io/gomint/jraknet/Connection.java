@@ -103,7 +103,7 @@ public abstract class Connection {
 
     Connection( InetSocketAddress address, ConnectionState initialState ) {
         this.address = address;
-        this.state = initialState;
+        this.setState( initialState );
         this.reset();
         this.initUpdater();
     }
@@ -465,7 +465,7 @@ public abstract class Connection {
         }
 
         // Check for state change
-        if ( this.isConnecting() && this.connectingStart + 10000L < time ) {
+        if ( this.isConnecting() && this.connectingStart + 30000L < time ) {
             this.reset();
         }
     }
@@ -1405,6 +1405,7 @@ public abstract class Connection {
         // Attach to the current event loop
         this.updater = EventLoops.LOOP_GROUP.scheduleWithFixedDelay( () -> {
             if ( !update( System.currentTimeMillis() ) ) {
+                getImplementationLogger().trace( "Removing connection" );
                 notifyRemoval();
             }
         }, 0, 10, TimeUnit.MILLISECONDS );
