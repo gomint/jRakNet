@@ -24,7 +24,7 @@ public class RakNetConstraints {
     public static final int MINIMUM_MTU_SIZE = 400;
 
     // Internal constant used by RakNet (may be seen here: https://github.com/OculusVR/RakNet/blob/master/Source/MTUSize.h)
-    public static final int MAXIMUM_MTU_SIZE = 1430; // VPN stuff has the widest adoption
+    public static final int MAXIMUM_MTU_SIZE = 1464; // Vanilla only goes up to this
 
     // Byte Signature used to identify unconnected data packets for yet unconnected connections (may be seen here: https://github.com/OculusVR/RakNet/blob/master/Source/RakPeer.cpp#L135)
     public static final byte[] OFFLINE_MESSAGE_DATA_ID = new byte[]{ (byte) 0x00, (byte) 0xFF, (byte) 0xFF, (byte) 0x00, (byte) 0xFE, (byte) 0xFE, (byte) 0xFE, (byte) 0xFE, (byte) 0xFD, (byte) 0xFD, (byte) 0xFD, (byte) 0xFD, (byte) 0x12, (byte) 0x34, (byte) 0x56, (byte) 0x78 };
