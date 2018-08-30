@@ -40,7 +40,6 @@ class ClientConnection extends Connection {
         this.client = client;
         this.connectionAttempts = 0;
         this.lastConnectionAttempt = 0L;
-        this.protocolVersion = protocolVersion != -1 ? protocolVersion : client.mojangModificationEnabled ? RAKNET_PROTOCOL_VERSION_MOJANG : RAKNET_PROTOCOL_VERSION;
     }
 
     // ================================ CONNECTION ================================ //
@@ -261,7 +260,7 @@ class ClientConnection extends Connection {
         PacketBuffer buffer = new PacketBuffer( MAXIMUM_MTU_SIZE );
         buffer.writeByte( OPEN_CONNECTION_REQUEST_1 );
         buffer.writeOfflineMessageDataId();
-        buffer.writeByte( this.protocolVersion );
+        buffer.writeByte( this.client.mojangModificationEnabled ? RAKNET_PROTOCOL_VERSION_MOJANG : RAKNET_PROTOCOL_VERSION );
 
         // Simulate filling with zeroes, in order to "test out" maximum MTU size:
         buffer.skip( mtuSize - 18 );

@@ -8,9 +8,6 @@ public class RakNetConstraints {
 
     // =========================== CONSTANTS =========================== //
 
-    // Version of the RakNet library's protocol MCPE is using in versions under 280 (< 1.6)
-    public static final byte RAKNET_PROTOCL_VERSION_MOJANG_UNDER_280 = 8;
-
     // Version of the RakNet library's protocol MCPE is using
     public static final byte RAKNET_PROTOCOL_VERSION_MOJANG = 9;
 
@@ -21,7 +18,7 @@ public class RakNetConstraints {
     public static final int NUM_ORDERING_CHANNELS = 32;
 
     // Internal constant used by RakNet (may be seen here: https://github.com/OculusVR/RakNet/blob/master/Source/MTUSize.h)
-    public static final int MINIMUM_MTU_SIZE = 400;
+    public static final int MINIMUM_MTU_SIZE = 576;
 
     // Internal constant used by RakNet (may be seen here: https://github.com/OculusVR/RakNet/blob/master/Source/MTUSize.h)
     public static final int MAXIMUM_MTU_SIZE = 1464; // Vanilla only goes up to this

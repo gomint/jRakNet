@@ -178,13 +178,12 @@ class ServerConnection extends Connection {
 
 		// Check for correct protocol:
 		if ( ( !server.mojangModificationEnabled && remoteProtocol != RAKNET_PROTOCOL_VERSION  ) ||
-				( server.mojangModificationEnabled && ( remoteProtocol != RAKNET_PROTOCOL_VERSION_MOJANG && remoteProtocol != RAKNET_PROTOCL_VERSION_MOJANG_UNDER_280 ) ) ) {
+				( server.mojangModificationEnabled && ( remoteProtocol != RAKNET_PROTOCOL_VERSION_MOJANG ) ) ) {
 			this.sendIncompatibleProtocolVersion();
 			this.setState( ConnectionState.UNCONNECTED );
 			return;
 		}
 
-		this.protocolVersion = remoteProtocol;
 		this.sendConnectionReply1( sender, this.firstMTUSeen = datagram.getRemaining() + 18 );
 	}
 

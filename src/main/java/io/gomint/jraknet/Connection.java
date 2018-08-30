@@ -96,9 +96,6 @@ public abstract class Connection {
     private SlidingWindow slidingWindow;
     private AtomicInteger unackedBytes = new AtomicInteger( 0 );
 
-    // Raknet protocol id
-    protected byte protocolVersion;
-
     // ================================ CONSTRUCTORS ================================ //
 
     Connection( InetSocketAddress address, ConnectionState initialState ) {
@@ -157,15 +154,6 @@ public abstract class Connection {
      */
     public ConnectionState getState() {
         return this.state;
-    }
-
-    /**
-     * Get the protocol version this connection uses
-     *
-     * @return protocol of this connection
-     */
-    public byte getProtocolVersion() {
-        return this.protocolVersion;
     }
 
     /**
@@ -466,6 +454,7 @@ public abstract class Connection {
 
         // Check for state change
         if ( this.isConnecting() && this.connectingStart + 30000L < time ) {
+            this.getImplementationLogger().warn( "Connection with {} has been reset: Connect timeout (30s)", this.address );
             this.reset();
         }
     }
