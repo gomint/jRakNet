@@ -1393,9 +1393,13 @@ public abstract class Connection {
     void initUpdater() {
         // Attach to the current event loop
         this.updater = EventLoops.LOOP_GROUP.scheduleWithFixedDelay( () -> {
-            if ( !update( System.currentTimeMillis() ) ) {
-                getImplementationLogger().trace( "Removing connection" );
-                notifyRemoval();
+            try {
+                if ( !update( System.currentTimeMillis() ) ) {
+                    getImplementationLogger().trace( "Removing connection" );
+                    notifyRemoval();
+                }
+            } catch ( Exception e ) {
+                this.getImplementationLogger().error( "Fatal error in connection ticking", e );
             }
         }, 0, 10, TimeUnit.MILLISECONDS );
     }
