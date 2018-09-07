@@ -47,6 +47,7 @@ public abstract class Connection {
     private long nextPacketLossCheck;
 
     // RTT tracking
+    private ReentrantLock rttLock = new ReentrantLock( true );
     private List<Integer> latestRTT = new ArrayList<>( 33 ); // Raknet uses 33 "pings" to check RTT
     private int rtt;
 
@@ -481,13 +482,19 @@ public abstract class Connection {
             this.nextPacketLossCheck = time + 1000;
         }
 
-        if ( this.latestRTT.size() == 33 ) {
-            int sum = 0;
-            for ( Integer currentRTT : this.latestRTT ) {
-                sum += currentRTT;
-            }
+        this.rttLock.lock();
+        try {
+            if ( this.latestRTT.size() == 33 ) {
+                int sum = 0;
 
-            this.rtt = sum / 33;
+                for ( Integer currentRTT : this.latestRTT ) {
+                    sum += currentRTT;
+                }
+
+                this.rtt = sum / 33;
+            }
+        } finally {
+            this.rttLock.unlock();
         }
     }
 
@@ -939,12 +946,17 @@ public abstract class Connection {
                         this.getImplementationLogger().trace( "Removing packet {} due to client ACK - remaining unacked bytes: {}", node.getReliableMessageNumber(), this.unackedBytes );
 
                         // Track RTT
-                        int currentRTT = (int) ( this.lastReceivedPacket - packet.getSendTime() );
-                        if ( this.latestRTT.size() == 33 ) {
-                            this.latestRTT.remove( 0 );
-                        }
+                        this.rttLock.lock();
+                        try {
+                            int currentRTT = (int) ( this.lastReceivedPacket - packet.getSendTime() );
+                            if ( this.latestRTT.size() == 33 ) {
+                                this.latestRTT.remove( 0 );
+                            }
 
-                        this.latestRTT.add( currentRTT );
+                            this.latestRTT.add( currentRTT );
+                        } finally {
+                            this.rttLock.unlock();
+                        }
                     }
 
                     node = node.getNext();
@@ -992,7 +1004,7 @@ public abstract class Connection {
         // Fast out in sending when there is nothing to do
         this.sendingACKsLock.lock();
         try {
-            if ( this.outgoingACKs.isEmpty() ) return;
+            if ( this.outgoingACKs == null || this.outgoingACKs.isEmpty() ) return;
         } finally {
             this.sendingACKsLock.unlock();
         }
@@ -1031,7 +1043,7 @@ public abstract class Connection {
         // Fast out in sending when there is nothing to do
         this.sendingNAKsLock.lock();
         try {
-            if ( this.outgoingNAKs.isEmpty() ) return;
+            if ( this.outgoingNAKs == null || this.outgoingNAKs.isEmpty() ) return;
         } finally {
             this.sendingNAKsLock.unlock();
         }
