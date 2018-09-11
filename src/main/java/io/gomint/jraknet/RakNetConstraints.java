@@ -48,8 +48,8 @@ public class RakNetConstraints {
     // Client -> Server
     public static final byte UNCONNECTED_PING = (byte) 0x01;
 
-    // Server -> Client
-    public static final byte UNCONNECTED_PONG = (byte) 0x02;
+    // Client -> Server
+    public static final byte UNCONNECTED_PING_OPEN_CONNECTION = (byte) 0x02;
 
     // Any -> Any
     public static final byte CONNECTED_PONG = (byte) 0x03;
@@ -100,7 +100,7 @@ public class RakNetConstraints {
     //
     // Note: Mojang made modifications to this packet's original data
     //       They appended a string containing the server's MOTD at the end
-    public static final byte UNCONNECTED_PONG_MOJANG = (byte) 0x1C;
+    public static final byte UNCONNECTED_PONG = (byte) 0x1C;
 
 
     public static final byte USER_PACKET_ENUM = (byte) 0x80;

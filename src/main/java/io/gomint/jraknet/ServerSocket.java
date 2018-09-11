@@ -17,12 +17,14 @@ import java.net.SocketAddress;
 import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
-import static io.gomint.jraknet.RakNetConstraints.*;
+import static io.gomint.jraknet.RakNetConstraints.OPEN_CONNECTION_REQUEST_1;
+import static io.gomint.jraknet.RakNetConstraints.UNCONNECTED_PING;
+import static io.gomint.jraknet.RakNetConstraints.UNCONNECTED_PING_OPEN_CONNECTION;
+import static io.gomint.jraknet.RakNetConstraints.UNCONNECTED_PONG;
 
 /**
  * @author BlackyPaw
@@ -191,6 +193,12 @@ public class ServerSocket extends Socket {
         if ( packetId == UNCONNECTED_PING ) {
             this.handleUnconnectedPing( sender, datagram );
             return true;
+        } else if ( packetId == UNCONNECTED_PING_OPEN_CONNECTION ) {
+            if ( this.connectionsByGuid.size() < this.maxConnections ) {
+                this.handleUnconnectedPing( sender, datagram );
+            }
+
+            return true; // We always handle this but we may not send a response
         }
 
         return false;
@@ -335,25 +343,16 @@ public class ServerSocket extends Socket {
         SocketEvent.PingPongInfo info = new SocketEvent.PingPongInfo( sender, sendPingTime, sendPingTime, -1, "" );
         this.propagateEvent( new SocketEvent( SocketEvent.Type.UNCONNECTED_PING, info ) );
 
-        PacketBuffer packet;
-        byte[] motdBytes = null;
+        byte[] motdBytes = info.getMotd().getBytes( StandardCharsets.UTF_8 );
+        PacketBuffer packet = new PacketBuffer( 35 + motdBytes.length );
 
-        if ( this.mojangModificationEnabled ) {
-            motdBytes = info.getMotd().getBytes( StandardCharsets.UTF_8 );
-            packet = new PacketBuffer( 35 + motdBytes.length );
-        } else {
-            packet = new PacketBuffer( 35 );
-        }
-
-        packet.writeByte( this.mojangModificationEnabled ? UNCONNECTED_PONG_MOJANG : UNCONNECTED_PONG );
+        packet.writeByte( UNCONNECTED_PONG );
         packet.writeLong( sendPingTime );
         packet.writeLong( this.getGuid() );
         packet.writeOfflineMessageDataId();
 
-        if ( this.mojangModificationEnabled && motdBytes != null ) {
-            packet.writeUShort( motdBytes.length );
-            packet.writeBytes( motdBytes );
-        }
+        packet.writeUShort( motdBytes.length );
+        packet.writeBytes( motdBytes );
 
         try {
             this.send( sender, packet );

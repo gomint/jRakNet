@@ -20,7 +20,6 @@ import java.util.Arrays;
 
 import static io.gomint.jraknet.RakNetConstraints.UNCONNECTED_PING;
 import static io.gomint.jraknet.RakNetConstraints.UNCONNECTED_PONG;
-import static io.gomint.jraknet.RakNetConstraints.UNCONNECTED_PONG_MOJANG;
 
 /**
  * @author BlackyPaw
@@ -215,7 +214,7 @@ public class ClientSocket extends Socket {
     protected boolean receiveDatagram( InetSocketAddress sender, PacketBuffer datagram ) {
         // Check if this might be an unconnected pong:
         byte packetId = datagram.getBuffer()[0];
-        if ( packetId == UNCONNECTED_PONG || packetId == UNCONNECTED_PONG_MOJANG ) {
+        if ( packetId == UNCONNECTED_PONG ) {
             this.handleUnconnectedPong( sender, datagram );
             return true;
         }
