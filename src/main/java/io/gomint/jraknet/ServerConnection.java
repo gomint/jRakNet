@@ -27,9 +27,6 @@ class ServerConnection extends Connection {
 	private AtomicLong bytesSend = new AtomicLong( 0 );
 	private AtomicLong bytesReceived = new AtomicLong( 0 );
 
-	// Some stuff we need for dropped connection handshakes
-	private int firstMTUSeen;
-
 	ServerConnection( ServerSocket server, InetSocketAddress address, ConnectionState initialState ) {
 		super( address, initialState );
 		this.server = server;
@@ -89,6 +86,7 @@ class ServerConnection extends Connection {
 				this.handlePreConnectionRequest2( sender, datagram );
 				return true;
 		}
+
 		return false;
 	}
 
@@ -164,11 +162,10 @@ class ServerConnection extends Connection {
 	}
 
 	private void handlePreConnectionRequest1( InetSocketAddress sender, PacketBuffer datagram ) {
-		if ( this.getState() != ConnectionState.UNCONNECTED ) {
-			this.sendConnectionReply1( sender, this.firstMTUSeen );
-			this.getImplementationLogger().debug( "Could not handle pre connection req 1 due to connection state {}", this.getState().name() );
-			return;
-		}
+        if ( !this.server.testAddressAndGuid( this ) ) {
+            this.sendAlreadyConnected();
+            return;
+        }
 
 		this.setState( ConnectionState.INITIALIZING );
 		datagram.skip( 1 );
@@ -184,15 +181,10 @@ class ServerConnection extends Connection {
 			return;
 		}
 
-		this.sendConnectionReply1( sender, this.firstMTUSeen = datagram.getRemaining() + 18 );
+		this.sendConnectionReply1( sender, datagram.getRemaining() + 18 );
 	}
 
 	private void handlePreConnectionRequest2( InetSocketAddress sender, PacketBuffer datagram ) {
-		if ( this.getState() != ConnectionState.INITIALIZING ) {
-			// Connection is not in a valid state to handle this packet:
-			return;
-		}
-
 		datagram.skip( 1 );                                                                       // Packet ID
 		datagram.readOfflineMessageDataId();                                                      // Offline Message Data ID
 		@SuppressWarnings( "unused" ) InetSocketAddress bindAddress = datagram.readAddress();     					  // Address the client bound to
@@ -221,13 +213,14 @@ class ServerConnection extends Connection {
 		this.setState( ConnectionState.CONNECTING );
 
 		PacketBuffer buffer = new PacketBuffer( packet.getPacketData(), 0 );
-		buffer.skip( 1 );                       // Packet ID
-		if ( this.getGuid() != buffer.readLong() ) { // Client GUID
+		buffer.skip( 1 );                               // Packet ID
+		if ( this.getGuid() != buffer.readLong() ) {    // Client GUID
 			this.setState( ConnectionState.UNCONNECTED );
 			this.sendConnectionRequestFailed();
 			return;
 		}
-		long    time            = buffer.readLong();          // Current client time
+
+		long    time            = buffer.readLong();    // Current client time
 		boolean securityEnabled = buffer.readBoolean(); // Whether or not a password is appended to the packet's usual data
 
 		if ( securityEnabled ) {
@@ -315,6 +308,7 @@ class ServerConnection extends Connection {
 		buffer.writeByte( id );
 		buffer.writeOfflineMessageDataId();
 		buffer.writeLong( this.server.getGuid() );
+
 		try {
 			this.sendRaw( this.getAddress(), buffer );
 		} catch ( IOException ignored ) {
@@ -330,6 +324,7 @@ class ServerConnection extends Connection {
 		buffer.writeAddress( this.getAddress() );
 		buffer.writeUShort( this.getMtuSize() );        // MTU
 		buffer.writeBoolean( false );                   // Not using LIBCAT Security
+
 		try {
 			this.sendRaw( this.getAddress(), buffer );
 		} catch ( IOException ignored ) {
