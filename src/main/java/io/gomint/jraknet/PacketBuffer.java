@@ -400,6 +400,12 @@ public class PacketBuffer {
         this.offset = 0;
     }
 
+    public void writeBytes( byte[] v, int from, int length ) {
+        this.ensureCapacity( v.length );
+        System.arraycopy( v, from, this.buffer, this.position, length );
+        this.position += v.length;
+    }
+
     public void writeBytes( byte[] v ) {
         this.ensureCapacity( v.length );
         System.arraycopy( v, 0, this.buffer, this.position, v.length );
