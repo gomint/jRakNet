@@ -322,6 +322,7 @@ public abstract class Connection {
      */
     public void send( PacketReliability reliability, int orderingChannel, byte[] data, int offset, int length ) {
         if ( !this.state.isReliable() || reliability == null || orderingChannel < 0 || orderingChannel >= NUM_ORDERING_CHANNELS || data == null || this.state == ConnectionState.DISCONNECTING ) {
+            this.getImplementationLogger().warn( "Skipping sending data: {} - {} - {} - {}", this.state, reliability, orderingChannel, data );
             return;
         }
 
@@ -368,6 +369,8 @@ public abstract class Connection {
             // Split up this packet:
             this.splitPacket( packet );
         } else {
+            this.getImplementationLogger().trace( "Adding new packet to send queue" );
+
             // Add it to the send buffer immediately:
             this.sendBuffer.offer( packet );
         }
@@ -548,6 +551,10 @@ public abstract class Connection {
         ConnectionState previousState = this.state;
         this.state = state;
 
+        if ( this.getImplementationLogger() != null ) {
+            this.getImplementationLogger().trace( "Setting connection state to {} for {}", state, this.getAddress() );
+        }
+
         switch ( this.state ) {
             case UNCONNECTED:
                 if ( previousState != ConnectionState.UNCONNECTED ) {
@@ -682,6 +689,8 @@ public abstract class Connection {
     }
 
     private void sendPacketQueued( long time ) {
+        this.getImplementationLogger().trace( "Sending packets {} - {}", this.resendQueue.size(), this.sendBuffer.size() );
+
         List<EncapsulatedPacket> sendList = new ArrayList<>();
         int currentDatagramSize = 0;
 
@@ -813,6 +822,7 @@ public abstract class Connection {
         }
 
         if ( !this.state.isReliable() ) {
+            this.getImplementationLogger().trace( "Not updating, not in reliable state" );
             return true;
         }
 
@@ -1084,6 +1094,7 @@ public abstract class Connection {
     private void handleConnectedDatagram( InetSocketAddress sender, PacketBuffer buffer, long time ) {
         if ( !this.state.isReliable() ) {
             // This connection is not reliable --> internal structures might not have been initialized
+            this.getImplementationLogger().trace( "Connection is not reliable: {}", sender );
             return;
         }
 
@@ -1404,7 +1415,7 @@ public abstract class Connection {
 
     void initUpdater() {
         // Attach to the current event loop
-        this.updater = EventLoops.LOOP_GROUP.scheduleWithFixedDelay( () -> {
+        this.updater = EventLoops.TICKER.scheduleWithFixedDelay( () -> {
             try {
                 if ( !update( System.currentTimeMillis() ) ) {
                     getImplementationLogger().trace( "Removing connection" );

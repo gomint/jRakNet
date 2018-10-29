@@ -387,6 +387,8 @@ public class ServerSocket extends Socket {
             // or invalid connection receive otherwise:
             byte packetId = datagram.getBuffer()[0];
             if ( packetId == OPEN_CONNECTION_REQUEST_1 ) {
+                this.getImplementationLogger().trace( "Generated new server connection for {}", sender );
+
                 connection = new ServerConnection( this, sender, ConnectionState.UNCONNECTED );
                 this.connectionsByAddress.put( sender, connection );
             }

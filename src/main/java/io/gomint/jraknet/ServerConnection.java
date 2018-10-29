@@ -57,6 +57,10 @@ class ServerConnection extends Connection {
 	 */
 	@Override
 	protected Logger getImplementationLogger() {
+		if ( this.server == null ) {
+			return null;
+		}
+
 		return this.server.getImplementationLogger();
 	}
 
@@ -225,6 +229,7 @@ class ServerConnection extends Connection {
 
 		if ( securityEnabled ) {
 			// We do not support security!
+			this.getImplementationLogger().warn( "Connection {} requested raknet security, we don't support that", this.getAddress().getAddress() );
 			this.sendConnectionRequestFailed();
 			return;
 		}
@@ -343,6 +348,7 @@ class ServerConnection extends Connection {
 			ipv6 = false;
 		} else {
 			// WTF is this IP version?
+			this.getImplementationLogger().warn( "Unknown IP version for {}", this.getAddress().getAddress() );
 			return;
 		}
 
