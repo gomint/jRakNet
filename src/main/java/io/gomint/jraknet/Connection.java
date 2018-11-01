@@ -322,7 +322,7 @@ public abstract class Connection {
      */
     public void send( PacketReliability reliability, int orderingChannel, byte[] data, int offset, int length ) {
         if ( !this.state.isReliable() || reliability == null || orderingChannel < 0 || orderingChannel >= NUM_ORDERING_CHANNELS || data == null || this.state == ConnectionState.DISCONNECTING ) {
-            this.getImplementationLogger().warn( "Skipping sending data: {} - {} - {} - {}", this.state, reliability, orderingChannel, data );
+            this.getImplementationLogger().trace( "Skipping sending data: {} - {} - {} - {}", this.state, reliability, orderingChannel, data );
             return;
         }
 
