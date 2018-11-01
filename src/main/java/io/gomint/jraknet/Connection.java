@@ -1426,6 +1426,7 @@ public abstract class Connection {
             }
         }, 0, 10, TimeUnit.MILLISECONDS );
     }
+
     void notifyRemoval() {
         this.updater.cancel( true );
     }

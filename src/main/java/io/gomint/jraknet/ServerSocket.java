@@ -399,7 +399,11 @@ public class ServerSocket extends Socket {
 
     void removeConnection( ServerConnection connection ) {
         this.connectionsByAddress.remove( connection.getAddress() );
-        this.connectionsByGuid.remove( connection.getGuid() );
+
+        if ( connection.hasGuid() ) {
+            this.connectionsByGuid.remove( connection.getGuid() );
+        }
+
         this.activeConnections.remove( connection );
     }
 

@@ -158,10 +158,7 @@ class ServerConnection extends Connection {
 
 	@Override
 	void notifyRemoval() {
-		if ( hasGuid() ) {
 			this.server.removeConnection( this );
-		}
-
 		super.notifyRemoval();
 	}
 
