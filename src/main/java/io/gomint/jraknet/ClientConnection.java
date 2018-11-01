@@ -51,6 +51,10 @@ class ClientConnection extends Connection {
 
     @Override
     protected Logger getImplementationLogger() {
+        if ( this.client == null ) {
+            return null;
+        }
+
         return this.client.getImplementationLogger();
     }
 
