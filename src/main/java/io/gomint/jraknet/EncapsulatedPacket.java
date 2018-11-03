@@ -24,7 +24,6 @@ public class EncapsulatedPacket {
 
     private long weight;
     private long nextExecution;
-    private int resendCount;
     private long sendTime; // Needed to track RTT
 
     public EncapsulatedPacket() {
@@ -278,14 +277,6 @@ public class EncapsulatedPacket {
         this.nextExecution = nextExecution;
     }
 
-    public void incrementSendCount() {
-        this.resendCount++;
-    }
-
-    public int getSendCount() {
-        return this.resendCount;
-    }
-
     public long getSendTime() {
         return this.sendTime;
     }
@@ -297,6 +288,11 @@ public class EncapsulatedPacket {
         }
 
         return this.reliableMessageNumber == ( (EncapsulatedPacket) obj ).reliableMessageNumber;
+    }
+
+    @Override
+    public int hashCode() {
+        return this.reliableMessageNumber;
     }
 
 }

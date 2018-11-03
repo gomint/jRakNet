@@ -12,11 +12,9 @@ import io.netty.util.internal.ThreadLocalRandom;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
 
 import static io.gomint.jraknet.RakNetConstraints.UNCONNECTED_PING;
 import static io.gomint.jraknet.RakNetConstraints.UNCONNECTED_PONG;
@@ -32,8 +30,6 @@ public class ClientSocket extends Socket {
 
     private ClientConnection connection;
     boolean mojangModificationEnabled;
-
-    private byte protocol = -1;
 
     /**
      * Constructs a new client socket ready for use.
@@ -55,13 +51,6 @@ public class ClientSocket extends Socket {
     }
 
     // ================================ PUBLIC API ================================ //
-
-    /**
-     * Override the protocol version used
-     */
-    public void setProtocolVersion( int protocolVersion ) {
-        this.protocol = (byte) protocolVersion;
-    }
 
     /**
      * Enable mojang modifications to this is compatible with MC:PE
@@ -93,8 +82,6 @@ public class ClientSocket extends Socket {
                 io.netty.channel.socket.DatagramPacket packet = (io.netty.channel.socket.DatagramPacket) msg;
                 PacketBuffer content = new PacketBuffer( packet.content() );
                 InetSocketAddress sender = packet.sender();
-
-                getImplementationLogger().trace( "IN>: {}", Arrays.toString( content.getBuffer() ) );
 
                 if ( !receiveDatagram( sender, content ) ) {
                     // Push datagram to update queue:
@@ -178,7 +165,7 @@ public class ClientSocket extends Socket {
         }
 
         // Connection will start to send pre-connection requests automatically:
-        this.connection = new ClientConnection( this, address, ConnectionState.INITIALIZING, this.protocol );
+        this.connection = new ClientConnection( this, address, ConnectionState.INITIALIZING );
     }
 
     /**
@@ -244,9 +231,8 @@ public class ClientSocket extends Socket {
      *
      * @param recipient The recipient of the data
      * @param buffer    The buffer to transmit
-     * @throws IOException Thrown if the transmission fails
      */
-    void send( InetSocketAddress recipient, PacketBuffer buffer ) throws IOException {
+    void send( InetSocketAddress recipient, PacketBuffer buffer ) {
         this.send( recipient, buffer.getBuffer(), buffer.getBufferOffset(), buffer.getPosition() - buffer.getBufferOffset() );
     }
 
@@ -258,11 +244,8 @@ public class ClientSocket extends Socket {
      * @param buffer    The buffer holding the data to send
      * @param offset    The offset into the buffer
      * @param length    The length of the data chunk to send
-     * @throws IOException Thrown if the transmission fails
      */
-    void send( InetSocketAddress recipient, byte[] buffer, int offset, int length ) throws IOException {
-        this.getImplementationLogger().trace( "<OUT: {}", Arrays.toString( buffer ) );
-
+    void send( InetSocketAddress recipient, byte[] buffer, int offset, int length ) {
         if ( this.channel != null ) {
             this.flush( new Flusher.FlushItem( this.channel, new DatagramPacket( Unpooled.wrappedBuffer( buffer, offset, length ), recipient ) ) );
         }
@@ -319,11 +302,7 @@ public class ClientSocket extends Socket {
         buffer.writeBytes( RakNetConstraints.OFFLINE_MESSAGE_DATA_ID );
         buffer.writeLong( this.getGuid() );
 
-        try {
-            this.send( recipient, buffer );
-        } catch ( IOException e ) {
-            this.logger.error( "Failed to send ping to recipient", e );
-        }
+        this.send( recipient, buffer );
     }
 
     /**

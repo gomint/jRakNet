@@ -126,12 +126,12 @@ public class PacketBuffer {
                 ( ( (long) this.buffer[this.position++] & 0xFF ) << 24 ) |
                 ( ( (long) this.buffer[this.position++] & 0xFF ) << 16 ) |
                 ( ( (long) this.buffer[this.position++] & 0xFF ) << 8 ) |
-                ( ( (long) this.buffer[this.position++] & 0xFF ) ) );
+                ( (long) this.buffer[this.position++] & 0xFF ) );
     }
 
     public long readLLong() {
         this.ensureRemaining( 8 );
-        return ( ( ( (long) this.buffer[this.position++] & 0xFF ) ) |
+        return ( ( (long) this.buffer[this.position++] & 0xFF ) |
                 ( ( (long) this.buffer[this.position++] & 0xFF ) << 8 ) |
                 ( ( (long) this.buffer[this.position++] & 0xFF ) << 16 ) |
                 ( ( (long) this.buffer[this.position++] & 0xFF ) << 24 ) |
@@ -166,10 +166,7 @@ public class PacketBuffer {
 
             long complement = ~this.readUInt();
 
-            String hostname = String.valueOf( ( complement >> 24 ) & 0xFF ) + "." +
-                    String.valueOf( ( complement >> 16 ) & 0xFF ) + "." +
-                    String.valueOf( ( complement >> 8 ) & 0xFF ) + "." +
-                    String.valueOf( complement & 0xFF );
+            String hostname = String.format( "%s.%s.%s.%s", String.valueOf( ( complement >> 24 ) & 0xFF ), String.valueOf( ( complement >> 16 ) & 0xFF ), String.valueOf( ( complement >> 8 ) & 0xFF ), String.valueOf( complement & 0xFF ) );
             int port = this.readUShort();
 
             return InetSocketAddress.createUnresolved( hostname, port );
@@ -200,7 +197,7 @@ public class PacketBuffer {
         return ( ( ( (long) this.buffer[this.position++] & 0xFF ) << 24 ) |
                 ( ( (long) this.buffer[this.position++] & 0xFF ) << 16 ) |
                 ( ( (long) this.buffer[this.position++] & 0xFF ) << 8 ) |
-                ( ( (long) this.buffer[this.position++] & 0xFF ) ) );
+                ( (long) this.buffer[this.position++] & 0xFF ) );
     }
 
     public UUID readUUID() {
@@ -252,17 +249,17 @@ public class PacketBuffer {
 
     private BigInteger readVarNumber( int length ) {
         BigInteger result = BigInteger.ZERO;
-        int offset = 0;
+        int shiftOffset = 0;
 
         do {
-            long b;
-            if ( ( ( b = (long) this.readByte() ) & 128L ) == 0L ) {
-                return result.or( BigInteger.valueOf( b << ( offset * 7 ) ) );
+            long b = (long) ( this.readByte() ) & 128L;
+            if ( b == 0L ) {
+                return result.or( BigInteger.valueOf( b << ( shiftOffset * 7 ) ) );
             }
 
-            result = result.or( BigInteger.valueOf( ( b & 127L ) << offset * 7 ) );
-            offset++;
-        } while ( offset < length );
+            result = result.or( BigInteger.valueOf( ( b & 127L ) << shiftOffset * 7 ) );
+            shiftOffset++;
+        } while ( shiftOffset < length );
 
         throw new IllegalArgumentException( "Var Number too big" );
     }
@@ -281,10 +278,6 @@ public class PacketBuffer {
         BigInteger left = origin.shiftLeft( 1 );
         BigInteger right = origin.shiftRight( 63 );
         return left.xor( right );
-    }
-
-    private BigInteger decodeZigZag64( long v ) {
-        return decodeZigZag64( BigInteger.valueOf( v ).and( UNSIGNED_LONG_MAX_VALUE ) );
     }
 
     private BigInteger decodeZigZag64( BigInteger v ) {
@@ -329,10 +322,11 @@ public class PacketBuffer {
 
         value = value.and( UNSIGNED_LONG_MAX_VALUE );
         BigInteger i = BigInteger.valueOf( -128 );
-        BigInteger BIX7F = BigInteger.valueOf( 0x7f );
-        BigInteger BIX80 = BigInteger.valueOf( 0x80 );
+        BigInteger x7f = BigInteger.valueOf( 0x7f );
+        BigInteger x80 = BigInteger.valueOf( 0x80 );
+
         while ( !value.and( i ).equals( BigInteger.ZERO ) ) {
-            this.writeByte( value.and( BIX7F ).or( BIX80 ).byteValue() );
+            this.writeByte( value.and( x7f ).or( x80 ).byteValue() );
             value = value.shiftRight( 7 );
         }
 
@@ -348,7 +342,9 @@ public class PacketBuffer {
         int length = this.readUShort();
         boolean isPair;
         TriadRange[] ranges = new TriadRange[length];
-        int min, max;
+        int min;
+        int max;
+
         for ( int i = 0; i < length; ++i ) {
             isPair = !this.readBoolean();
             min = this.readTriad();
@@ -392,7 +388,7 @@ public class PacketBuffer {
     }
 
     private void reallocate( int extra ) {
-        byte[] nextBuffer = new byte[2 * this.buffer.length];
+        byte[] nextBuffer = new byte[2 * extra + this.buffer.length];
         System.arraycopy( this.buffer, this.offset, nextBuffer, 0, this.buffer.length - this.offset );
 
         this.buffer = nextBuffer;

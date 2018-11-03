@@ -35,7 +35,7 @@ class ClientConnection extends Connection {
     private int connectionAttempts;
     private long lastConnectionAttempt;
 
-    public ClientConnection( ClientSocket client, InetSocketAddress address, ConnectionState initialState, byte protocolVersion ) {
+    public ClientConnection( ClientSocket client, InetSocketAddress address, ConnectionState initialState ) {
         super( address, initialState );
         this.client = client;
         this.connectionAttempts = 0;
@@ -118,7 +118,7 @@ class ClientConnection extends Connection {
                 this.handlePreConnectionReply1( sender, datagram );
                 return true;
             case OPEN_CONNECTION_REPLY_2:
-                this.handlePreConnectionReply2( sender, datagram );
+                this.handlePreConnectionReply2( datagram );
                 return true;
             case ALREADY_CONNECTED:
                 this.handleAlreadyConnected( sender, datagram );
@@ -129,19 +129,20 @@ class ClientConnection extends Connection {
             case CONNECTION_REQUEST_FAILED:
                 this.handleConnectionRequestFailed( sender, datagram );
                 return true;
+            default:
+                return false;
         }
-        return false;
     }
 
     @Override
     protected boolean handlePacket0( EncapsulatedPacket packet ) {
         // Handle special internal packets:
         byte packetId = packet.getPacketData()[0];
-        switch ( packetId ) {
-            case CONNECTION_REQUEST_ACCEPTED:
-                this.handleConnectionRequestAccepted( packet );
-                return true;
+        if ( packetId == CONNECTION_REQUEST_ACCEPTED ) {
+            this.handleConnectionRequestAccepted( packet );
+            return true;
         }
+
         return false;
     }
 
@@ -186,7 +187,7 @@ class ClientConnection extends Connection {
         this.sendPreConnectionRequest2( sender );
     }
 
-    private void handlePreConnectionReply2( InetSocketAddress sender, PacketBuffer datagram ) {
+    private void handlePreConnectionReply2( PacketBuffer datagram ) {
         if ( this.getState() != ConnectionState.INITIALIZING ) {
             return;
         }
@@ -200,22 +201,12 @@ class ClientConnection extends Connection {
         }
 
         this.setMtuSize( datagram.readUShort() );                                                 // MTU Size
-        @SuppressWarnings( "unused" ) boolean securityEnabled = datagram.readBoolean();           // Security Enabled
-
-		/* if ( securityEnabled ) {
-			// We don't support security:
-			this.state = ConnectionState.UNCONNECTED;
-			if ( this.eventHandler != null ) {
-				SocketEvent event = new SocketEvent( SocketEvent.Type.CONNECTION_ATTEMPT_FAILED, "Security is not supported" );
-				this.eventHandler.onSocketEvent( this, event );
-			}
-			return;
-		} */
+        datagram.readBoolean();                                                                   // Security Enabled
 
         this.initializeStructures();
         this.setState( ConnectionState.RELIABLE );
 
-        this.sendConnectionRequest( sender );
+        this.sendConnectionRequest();
     }
 
     @SuppressWarnings( "unused" )
@@ -246,7 +237,7 @@ class ClientConnection extends Connection {
             buffer.readAddress();                                                               // Server Local IPs
         }
 
-        @SuppressWarnings( "unused" ) long pingTime = buffer.readLong();                                             // Ping Time
+        buffer.readLong();                                                                     // Ping Time
         long pongTime = buffer.readLong();                                                      // Pong Time
 
         // Send response:
@@ -291,17 +282,12 @@ class ClientConnection extends Connection {
         }
     }
 
-    private void sendConnectionRequest( @SuppressWarnings( "unused" ) InetSocketAddress recipient ) {
+    private void sendConnectionRequest() {
         PacketBuffer buffer = new PacketBuffer( 18 );
         buffer.writeByte( CONNECTION_REQUEST );                 // Packet ID
         buffer.writeLong( this.client.getGuid() );              // Client GUID
         buffer.writeLong( System.currentTimeMillis() );         // Ping Time
         buffer.writeBoolean( false );                           // Security Enabled
-
-		/*                  PASSWORD HANDLING
-		String password = ...;
-		buffer.writeBytes( password.getBytes( StandardCharsets.US_ASCII ) );
-		*/
 
         this.send( PacketReliability.RELIABLE_ORDERED, 0, buffer.getBuffer(), buffer.getBufferOffset(), buffer.getPosition() - buffer.getBufferOffset() );
     }

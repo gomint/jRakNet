@@ -17,9 +17,8 @@ public class SlidingWindow {
     private int threshold;
     private int cwnd;
 
-    private double lastRTT;
-    private double estimatedRTT = -1;
-    private double deviationRTT = -1;
+    private long estimatedRTT = -1;
+    private long deviationRTT = -1;
 
     private boolean ackAlreadyTicked;
     private boolean nakAlreadyTicked;
@@ -47,23 +46,21 @@ public class SlidingWindow {
         this.threshold = this.cwnd / 2;
     }
 
-    public void onACK( double rtt ) {
+    public void onACK( long rtt ) {
         if ( this.ackAlreadyTicked ) {
             return;
         }
 
         this.ackAlreadyTicked = true;
 
-
-        this.lastRTT = rtt;
         if ( this.estimatedRTT == -1 ) {
             this.estimatedRTT = rtt;
             this.deviationRTT = rtt;
         } else {
             double d = .05;
-            double difference = rtt - this.estimatedRTT;
-            this.estimatedRTT = this.estimatedRTT + d * difference;
-            this.deviationRTT = this.deviationRTT + d * ( Math.abs( difference ) - this.deviationRTT );
+            long difference = rtt - this.estimatedRTT;
+            this.estimatedRTT = this.estimatedRTT + (long) Math.floor( d * difference );
+            this.deviationRTT = this.deviationRTT + (long) Math.floor( d * ( Math.abs( difference ) - this.deviationRTT ) );
         }
 
         if ( this.isInSlowStart() ) {
@@ -79,7 +76,7 @@ public class SlidingWindow {
         }
     }
 
-    public long getRTOForRetransmission( int timesSent ) {
+    public long getRTOForRetransmission() {
         if ( this.estimatedRTT == -1 ) {
             return MAX_THRESHOLD;
         }

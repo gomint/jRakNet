@@ -11,7 +11,6 @@ import io.netty.channel.socket.nio.NioDatagramChannel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.SocketException;
@@ -251,9 +250,8 @@ public class ServerSocket extends Socket {
      *
      * @param recipient The recipient of the data
      * @param buffer    The buffer to transmit
-     * @throws IOException Thrown if the transmission fails
      */
-    void send( InetSocketAddress recipient, PacketBuffer buffer ) throws IOException {
+    void send( InetSocketAddress recipient, PacketBuffer buffer ) {
         this.send( recipient, buffer.getBuffer(), buffer.getBufferOffset(), buffer.getPosition() - buffer.getBufferOffset() );
     }
 
@@ -265,9 +263,8 @@ public class ServerSocket extends Socket {
      * @param buffer    The buffer holding the data to send
      * @param offset    The offset into the buffer
      * @param length    The length of the data chunk to send
-     * @throws IOException Thrown if the transmission fails
      */
-    void send( InetSocketAddress recipient, byte[] buffer, int offset, int length ) throws IOException {
+    private void send( InetSocketAddress recipient, byte[] buffer, int offset, int length ) {
         if ( this.channel != null ) {
             this.flush( new Flusher.FlushItem( this.channel, new DatagramPacket( Unpooled.wrappedBuffer( buffer, offset, length ), recipient ) ) );
         }
@@ -354,11 +351,7 @@ public class ServerSocket extends Socket {
         packet.writeUShort( motdBytes.length );
         packet.writeBytes( motdBytes );
 
-        try {
-            this.send( sender, packet );
-        } catch ( IOException ignored ) {
-            // ._.
-        }
+        this.send( sender, packet );
     }
 
     /**

@@ -19,13 +19,6 @@ public class BitQueue {
 	private int tail;
 
 	/**
-	 * Constructs a new bit queue with a default capacity.
-	 */
-	public BitQueue() {
-		this( 128 );
-	}
-
-	/**
 	 * Constructs a new bit queue which will be able to hold at least capacity bits on creation.
 	 *
 	 * @param capacity The initial capacity of the queue
@@ -98,7 +91,8 @@ public class BitQueue {
 			int by1  = this.tail >> 3;
 			int by2  = ( by1 + 1 ) & ( this.buffer.length - 1 );
 			int mask;
-			int b1, b2;
+			int b1;
+			int b2;
 
 			int cursor = 0;
 			while ( cursor < size ) {

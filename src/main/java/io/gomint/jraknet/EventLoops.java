@@ -15,20 +15,14 @@ import java.util.concurrent.ThreadFactory;
  */
 public class EventLoops {
 
-    public static ScheduledExecutorService TICKER;
-    public static EventLoopGroup LOOP_GROUP;
-    public static Flusher FLUSHER;
-
-    static {
-        EventLoops.TICKER = Executors.newScheduledThreadPool( 2, new ThreadFactory() {
-            @Override
-            public Thread newThread( Runnable r ) {
-                return new Thread( r, "jRaknet Ticker" );
-            }
-        } );
-        EventLoops.LOOP_GROUP = Epoll.isAvailable() ? new EpollEventLoopGroup() : new NioEventLoopGroup();
-        EventLoops.FLUSHER = new Flusher( EventLoops.LOOP_GROUP.next() );
-    }
+    static final ScheduledExecutorService TICKER = Executors.newScheduledThreadPool( 2, new ThreadFactory() {
+        @Override
+        public Thread newThread( Runnable r ) {
+            return new Thread( r, "jRaknet Ticker" );
+        }
+    } );
+    static final EventLoopGroup LOOP_GROUP = Epoll.isAvailable() ? new EpollEventLoopGroup() : new NioEventLoopGroup();
+    static final Flusher FLUSHER = new Flusher( EventLoops.LOOP_GROUP.next() );
 
     public static void cleanup() {
         EventLoops.TICKER.shutdownNow();

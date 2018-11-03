@@ -2,7 +2,6 @@ package io.gomint.jraknet;
 
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.Channel;
-import io.netty.channel.EventLoop;
 import org.slf4j.Logger;
 
 import java.net.InetSocketAddress;
