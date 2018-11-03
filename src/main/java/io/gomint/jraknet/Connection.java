@@ -1,18 +1,43 @@
 package io.gomint.jraknet;
 
-import io.gomint.jraknet.datastructures.*;
+import io.gomint.jraknet.datastructures.BinaryOrderingHeap;
+import io.gomint.jraknet.datastructures.BitQueue;
+import io.gomint.jraknet.datastructures.DatagramContentNode;
+import io.gomint.jraknet.datastructures.FixedSizeRRBuffer;
+import io.gomint.jraknet.datastructures.OrderingHeap;
+import io.gomint.jraknet.datastructures.TriadRange;
 import org.slf4j.Logger;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Queue;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
 
-import static io.gomint.jraknet.RakNetConstraints.*;
+import static io.gomint.jraknet.RakNetConstraints.CONNECTED_PING;
+import static io.gomint.jraknet.RakNetConstraints.CONNECTED_PONG;
+import static io.gomint.jraknet.RakNetConstraints.DATA_HEADER_BYTE_LENGTH;
+import static io.gomint.jraknet.RakNetConstraints.DETECT_LOST_CONNECTION;
+import static io.gomint.jraknet.RakNetConstraints.DISCONNECTION_NOTIFICATION;
+import static io.gomint.jraknet.RakNetConstraints.MAX_MESSAGE_HEADER_BYTE_LENGTH;
+import static io.gomint.jraknet.RakNetConstraints.NUM_ORDERING_CHANNELS;
+import static io.gomint.jraknet.RakNetConstraints.USER_PACKET_ENUM;
 
 /**
  * @author BlackyPaw
@@ -1353,8 +1378,12 @@ public abstract class Connection {
             this.splitPacketChannels.put( packet.getSplitPacketId(), assembler );
         }
 
-        packet = assembler.add( packet );
-        return packet;
+        EncapsulatedPacket reassembledPacket = assembler.add( packet );
+        if ( reassembledPacket != null ) {
+            this.splitPacketChannels.remove( packet.getSplitPacketId() );
+        }
+
+        return reassembledPacket;
     }
 
     private void handleConnectedPing( EncapsulatedPacket packet ) {

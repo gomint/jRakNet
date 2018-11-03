@@ -1,15 +1,11 @@
 package io.gomint.jraknet;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 /**
  * @author BlackyPaw
  * @version 1.0
  */
 class SplitPacketAssembler {
 
-    private final static Logger logger = LoggerFactory.getLogger( SplitPacketAssembler.class );
     private final EncapsulatedPacket[] parts;
     private int found;
 
