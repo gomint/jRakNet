@@ -1,4 +1,4 @@
-module jraknet {
+module gomint.jraknet {
     requires slf4j.api;
 
     requires io.netty.transport;
