@@ -1355,12 +1355,8 @@ public abstract class Connection {
             this.splitPacketChannels.put( packet.getSplitPacketId(), assembler );
         }
 
-        EncapsulatedPacket reassembledPacket = assembler.add( packet );
-        if ( reassembledPacket != null ) {
-            this.splitPacketChannels.remove( packet.getSplitPacketId() );
-        }
-
-        return reassembledPacket;
+        packet = assembler.add( packet );
+        return packet;
     }
 
     private void handleConnectedPing( EncapsulatedPacket packet ) {
