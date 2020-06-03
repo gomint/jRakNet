@@ -8,18 +8,32 @@
     <artifactId>jraknet</artifactId>
     <version>6.2.0-SNAPSHOT</version>
 
-    <!-- Distribution Management -->
-    <distributionManagement>
+    <repositories>
         <repository>
-            <id>gomint-repo</id>
-            <name>GoMint Release Repository</name>
-            <url>https://repo.gomint.io/content/repositories/releases/</url>
+            <id>central</id>
+            <url>https://repo1.maven.org/maven2</url>
+            <releases>
+                <enabled>true</enabled>
+            </releases>
         </repository>
+        <repository>
+            <id>ossrh</id>
+            <url>https://oss.sonatype.org/content/repositories/snapshots</url>
+            <snapshots>
+                <enabled>true</enabled>
+            </snapshots>
+        </repository>
+    </repositories>
+
+    <distributionManagement>
         <snapshotRepository>
-            <id>gomint-snapshots</id>
-            <name>GoMint Snapshot Repository</name>
-            <url>https://repo.gomint.io/content/repositories/snapshots/</url>
+            <id>ossrh</id>
+            <url>https://oss.sonatype.org/content/repositories/snapshots</url>
         </snapshotRepository>
+        <repository>
+            <id>ossrh</id>
+            <url>https://oss.sonatype.org/service/local/staging/deploy/maven2/</url>
+        </repository>
     </distributionManagement>
 
     <dependencies>
