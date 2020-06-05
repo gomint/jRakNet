@@ -514,10 +514,7 @@ public class PacketBuffer {
 
             Inet4Address inet = (Inet4Address) addr.getAddress();
             byte[] bytes = inet.getAddress();
-            long complement = ( ( (long) bytes[0] << 24 ) |
-                    ( (long) bytes[1] << 16 ) |
-                    ( (long) bytes[2] << 8 ) |
-                    ( (long) bytes[3] ) );
+            int complement = (bytes[0] & 255) << 24 | (bytes[1] & 255) << 16 | (bytes[2] & 255) << 8 | (int)bytes[3] & 255;
             complement = ~complement;
 
             this.writeUInt( complement );

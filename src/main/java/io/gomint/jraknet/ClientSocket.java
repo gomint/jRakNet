@@ -83,6 +83,8 @@ public class ClientSocket extends Socket {
                 PacketBuffer content = new PacketBuffer( packet.content() );
                 InetSocketAddress sender = packet.sender();
 
+                getImplementationLogger().trace( "IN> {}", content );
+
                 if ( !receiveDatagram( sender, content ) ) {
                     // Push datagram to update queue:
                     handleDatagram( sender, content, System.currentTimeMillis() );
@@ -165,7 +167,7 @@ public class ClientSocket extends Socket {
         }
 
         // Connection will start to send pre-connection requests automatically:
-        this.connection = new ClientConnection( this, address, ConnectionState.INITIALIZING );
+        this.connection = new ClientConnection( this, address );
     }
 
     /**

@@ -128,6 +128,11 @@ public abstract class Socket implements AutoCloseable {
     }
 
     protected void flush( Flusher.FlushItem item ) {
+        if ( getImplementationLogger().isTraceEnabled() ) {
+            PacketBuffer content = new PacketBuffer( item.request.content().copy() );
+            getImplementationLogger().trace("<OUT {}", content );
+        }
+
         EventLoops.FLUSHER.queued.add( item );
         EventLoops.FLUSHER.start();
     }

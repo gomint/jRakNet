@@ -35,11 +35,13 @@ class ClientConnection extends Connection {
     private int connectionAttempts;
     private long lastConnectionAttempt;
 
-    public ClientConnection( ClientSocket client, InetSocketAddress address, ConnectionState initialState ) {
-        super( address, initialState );
+    public ClientConnection( ClientSocket client, InetSocketAddress address ) {
+        super( address, ConnectionState.INITIALIZING );
         this.client = client;
         this.connectionAttempts = 0;
-        this.lastConnectionAttempt = 0L;
+        this.lastConnectionAttempt = System.currentTimeMillis();
+
+        this.sendPreConnectionRequest1( address, MAXIMUM_MTU_SIZE );
     }
 
     // ================================ CONNECTION ================================ //
@@ -258,7 +260,7 @@ class ClientConnection extends Connection {
         buffer.writeByte( this.client.mojangModificationEnabled ? RAKNET_PROTOCOL_VERSION_MOJANG : RAKNET_PROTOCOL_VERSION );
 
         // Simulate filling with zeroes, in order to "test out" maximum MTU size:
-        buffer.skip( mtuSize - 18 );
+        buffer.skip( mtuSize - ( 2 + RakNetConstraints.OFFLINE_MESSAGE_DATA_ID.length + RakNetConstraints.DATA_HEADER_BYTE_LENGTH) );
 
         try {
             this.sendRaw( recipient, buffer );

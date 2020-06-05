@@ -3,6 +3,7 @@ package io.gomint.jraknet;
 import io.netty.channel.Channel;
 import io.netty.channel.EventLoop;
 
+import io.netty.channel.socket.DatagramPacket;
 import java.lang.ref.WeakReference;
 import java.util.HashSet;
 import java.util.Queue;
@@ -73,9 +74,9 @@ public final class Flusher implements Runnable {
 
     public static class FlushItem {
         final Channel channel;
-        final Object request;
+        final DatagramPacket request;
 
-        public FlushItem( Channel channel, Object request ) {
+        public FlushItem( Channel channel, DatagramPacket request ) {
             this.channel = channel;
             this.request = request;
         }
