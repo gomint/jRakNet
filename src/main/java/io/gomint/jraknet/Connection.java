@@ -6,6 +6,8 @@ import io.gomint.jraknet.datastructures.DatagramContentNode;
 import io.gomint.jraknet.datastructures.FixedSizeRRBuffer;
 import io.gomint.jraknet.datastructures.OrderingHeap;
 import io.gomint.jraknet.datastructures.TriadRange;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.PooledByteBufAllocator;
 import org.slf4j.Logger;
 
 import java.io.IOException;
@@ -320,21 +322,12 @@ public abstract class Connection {
     }
 
     /**
-     * Sends the specified data ensuring the packet reliability {@link PacketReliability#RELIABLE}.
-     *
-     * @param data The data to send
-     */
-    public void send( byte[] data ) {
-        this.send( PacketReliability.RELIABLE, 0, data );
-    }
-
-    /**
      * Sends the specified data ensuring the given packet reliability.
      *
      * @param reliability The reliability to ensure
      * @param data        The data to send
      */
-    public void send( PacketReliability reliability, byte[] data ) {
+    public void send( PacketReliability reliability, PacketBuffer data ) {
         this.send( reliability, 0, data );
     }
 
@@ -346,35 +339,16 @@ public abstract class Connection {
      * @param orderingChannel The ordering channel to send the data on
      * @param data            The data to send
      */
-    public void send( PacketReliability reliability, int orderingChannel, byte[] data ) {
-        this.send( reliability, orderingChannel, data, 0, data.length );
-    }
-
-    /**
-     * Sends the specified data ensuring the given packet reliability on the specified ordering channel
-     * (must be smaller than {@link RakNetConstraints#NUM_ORDERING_CHANNELS}. In case the data is interleaved
-     * a copy must be made internally so use this method with care!
-     *
-     * @param reliability     The reliability to ensure
-     * @param orderingChannel The ordering channel to send the data on
-     * @param data            The data to send
-     * @param offset          The offset into the data array
-     * @param length          The length of the data chunk to send
-     */
-    public void send( PacketReliability reliability, int orderingChannel, byte[] data, int offset, int length ) {
+    public void send( PacketReliability reliability, int orderingChannel, PacketBuffer data ) {
         if ( !this.state.isReliable() || reliability == null || orderingChannel < 0 || orderingChannel >= NUM_ORDERING_CHANNELS || data == null || this.state == ConnectionState.DISCONNECTING ) {
             this.getImplementationLogger().trace( "Skipping sending data: {} - {} - {} - {}", this.state, reliability, orderingChannel, data );
             return;
         }
 
-        EncapsulatedPacket packet = new EncapsulatedPacket();
+        data.setReadPosition(0);
 
-        // Got to copy packet data if it is not aligned correctly:
-        if ( offset != 0 || length != data.length ) {
-            packet.setPacketData( Arrays.copyOfRange( data, offset, offset + length ) );
-        } else {
-            packet.setPacketData( data );
-        }
+        EncapsulatedPacket packet = new EncapsulatedPacket();
+        packet.setPacketData(data.getBuffer());
 
         // Test if this packet must be split up:
         int maxSize = this.mtuSize - DATA_HEADER_BYTE_LENGTH - MAX_MESSAGE_HEADER_BYTE_LENGTH;
@@ -411,62 +385,13 @@ public abstract class Connection {
         if ( packet.getPacketLength() > maxSize ) {
             // Split up this packet:
             this.splitPacket( packet );
+            packet.release(); // Split packets don't need their parent anymore, they retain sliced views themselves
         } else {
             this.getImplementationLogger().trace( "Adding new packet to send queue" );
 
             // Add it to the send buffer immediately:
             this.sendBuffer.offer( packet );
         }
-    }
-
-    /**
-     * Sends the specified data ensuring the packet reliability {@link PacketReliability#RELIABLE}. Makes a copy
-     * of the specified data internally before caching it for send.
-     *
-     * @param data The data to send
-     */
-    public void sendCopy( byte[] data ) {
-        this.send( Arrays.copyOf( data, data.length ) );
-    }
-
-    /**
-     * Sends the specified data ensuring the given packet reliability. Makes a copy
-     * of the specified data internally before caching it for send.
-     *
-     * @param reliability The reliability to ensure
-     * @param data        The data to send
-     */
-    public void sendCopy( PacketReliability reliability, byte[] data ) {
-        this.send( reliability, Arrays.copyOf( data, data.length ) );
-    }
-
-    /**
-     * Sends the specified data ensuring the given packet reliability on the specified ordering channel
-     * (must be smaller than {@link RakNetConstraints#NUM_ORDERING_CHANNELS}. Makes a copy of the specified
-     * data internally before caching it for send.
-     *
-     * @param reliability     The reliability to ensure
-     * @param orderingChannel The ordering channel to send the data on
-     * @param data            The data to send
-     */
-    public void sendCopy( PacketReliability reliability, int orderingChannel, byte[] data ) {
-        this.send( reliability, orderingChannel, Arrays.copyOf( data, data.length ) );
-    }
-
-    /**
-     * Sends the specified data ensuring the given packet reliability on the specified ordering channel
-     * (must be smaller than {@link RakNetConstraints#NUM_ORDERING_CHANNELS}. In case the data is interleaved
-     * a copy must be made internally so use this method with care! Makes a copy of the specified data internally
-     * before caching it for send.
-     *
-     * @param reliability     The reliability to ensure
-     * @param orderingChannel The ordering channel to send the data on
-     * @param data            The data to send
-     * @param offset          The offset into the data array
-     * @param length          The length of the data chunk to send
-     */
-    public void sendCopy( PacketReliability reliability, int orderingChannel, byte[] data, int offset, int length ) {
-        this.send( reliability, orderingChannel, Arrays.copyOfRange( data, offset, offset + length ) );
     }
 
     // ================================ IMPLEMENTATION HOOKS ================================ //
@@ -752,6 +677,7 @@ public abstract class Connection {
                 EncapsulatedPacket packet = resendIterator.next();
                 if ( packet.getNextExecution() == 0L ) {
                     resendIterator.remove();
+                    packet.release();
                 } else if ( packet.getNextExecution() <= time ) {
                     currentResendBytes += packet.getHeaderLength() + packet.getPacketLength();
                     if ( currentResendBytes <= maxResendBytes ) {
@@ -925,7 +851,7 @@ public abstract class Connection {
             }
 
             EncapsulatedPacket copy = new EncapsulatedPacket( packet );
-            copy.setPacketData( Arrays.copyOfRange( packet.getPacketData(), cursor, cursor + count ) );
+            copy.setPacketData( packet.getPacketData().slice( cursor, count ) );
             copy.setSplitPacketId( splitPacketID );
             copy.setSplitPacketIndex( splitPacketIndex );
             copy.setSplitPacketCount( splitPacketCount );
@@ -1050,7 +976,7 @@ public abstract class Connection {
             this.sendingACKsLock.unlock();
         }
 
-        if ( buffer.getPosition() > 1 ) {
+        if ( buffer.getWritePosition() > 1 ) {
             // Send this data directly:
             try {
                 this.sendRaw( this.address, buffer );
@@ -1090,7 +1016,7 @@ public abstract class Connection {
         }
 
         // Only send when more data than the flag has been written
-        if ( buffer.getPosition() > 1 ) {
+        if ( buffer.getWritePosition() > 1 ) {
             // Send this data directly:
             try {
                 this.sendRaw( this.address, buffer );
@@ -1313,7 +1239,7 @@ public abstract class Connection {
             return;
         }
 
-        byte packetId = packet.getPacketData()[0];
+        byte packetId = packet.getPacketData().getByte(0);
         switch ( packetId ) {
             case CONNECTED_PING:
                 this.handleConnectedPing( packet );
@@ -1360,13 +1286,14 @@ public abstract class Connection {
     }
 
     private void handleConnectedPing( EncapsulatedPacket packet ) {
-        PacketBuffer buffer = new PacketBuffer( packet.getPacketData(), 0 );
+        PacketBuffer buffer = new PacketBuffer( packet.getPacketData() );
         buffer.skip( 1 );
         this.sendConnectedPong( buffer.readLong() );
     }
 
     private void handleConnectedPong( @SuppressWarnings( "unused" ) EncapsulatedPacket packet ) {
-        PacketBuffer buffer = new PacketBuffer( packet.getPacketData(), 1 );
+        PacketBuffer buffer = new PacketBuffer( packet.getPacketData() );
+        buffer.skip(1);
         long inPacket = buffer.readLong();
 
         if ( buffer.getRemaining() == 8 ) {
@@ -1391,7 +1318,7 @@ public abstract class Connection {
         PacketBuffer buffer = new PacketBuffer( 9 );
         buffer.writeByte( CONNECTED_PING );
         buffer.writeLong( time );
-        this.send( PacketReliability.RELIABLE, 0, buffer.getBuffer() );
+        this.send( PacketReliability.RELIABLE, 0, buffer );
         this.currentPingTime = time;
     }
 
@@ -1400,18 +1327,18 @@ public abstract class Connection {
         buffer.writeByte( CONNECTED_PONG );
         buffer.writeLong( pingTime );
         buffer.writeLong( System.currentTimeMillis() );
-        this.send( PacketReliability.RELIABLE, buffer.getBuffer() );
+        this.send( PacketReliability.RELIABLE, buffer );
     }
 
     private void sendDisconnectionNotification() {
-        byte[] data = new byte[1];
-        data[0] = DISCONNECTION_NOTIFICATION;
+        PacketBuffer data = new PacketBuffer(1);
+        data.writeByte(DISCONNECTION_NOTIFICATION);
         this.send( PacketReliability.RELIABLE_ORDERED, 0, data );
     }
 
     void sendDetectLostConnection() {
-        byte[] data = new byte[1];
-        data[0] = DETECT_LOST_CONNECTION;
+        PacketBuffer data = new PacketBuffer(1);
+        data.writeByte(DETECT_LOST_CONNECTION);
         this.send( PacketReliability.RELIABLE, 0, data );
     }
 

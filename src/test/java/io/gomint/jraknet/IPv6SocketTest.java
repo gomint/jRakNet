@@ -1,5 +1,7 @@
 package io.gomint.jraknet;
 
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.PooledByteBufAllocator;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.FixMethodOrder;
@@ -125,9 +127,13 @@ public class IPv6SocketTest {
 	@Test
 	public void testCSendReceive() throws SocketException {
 		byte[] packetData = "IPv6-Test".getBytes();
+		ByteBuf i = PooledByteBufAllocator.DEFAULT.directBuffer(packetData.length);
+		i.writeBytes(packetData);
 		
-		clientboundConnection.send( PacketReliability.RELIABLE_ORDERED, 0, packetData );
-		serverboundConnection.send( PacketReliability.RELIABLE_ORDERED, 0, packetData );
+		clientboundConnection.send( PacketReliability.RELIABLE_ORDERED, 0, new PacketBuffer(i) );
+		serverboundConnection.send( PacketReliability.RELIABLE_ORDERED, 0, new PacketBuffer(i) );
+
+		i.release();
 		
 		long begin = System.currentTimeMillis();
 		long now;
@@ -150,7 +156,10 @@ public class IPv6SocketTest {
 					break;
 				}
 				if ( ( packet = clientboundConnection.receive() ) != null ) {
-					if ( !Arrays.equals( packetData, packet.getPacketData() ) ) {
+					byte[] data = new byte[packetData.length];
+					packet.getPacketData().readBytes(data);
+
+					if ( !Arrays.equals( packetData, data ) ) {
 						success = false;
 						break;
 					}
@@ -163,7 +172,9 @@ public class IPv6SocketTest {
 					break;
 				}
 				if ( ( packet = serverboundConnection.receive() ) != null ) {
-					if ( !Arrays.equals( packetData, packet.getPacketData() ) ) {
+					byte[] data = new byte[packetData.length];
+					packet.getPacketData().readBytes(data);
+					if ( !Arrays.equals( packetData, data ) ) {
 						success = false;
 						break;
 					}

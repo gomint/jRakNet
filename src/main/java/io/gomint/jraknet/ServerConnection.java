@@ -56,7 +56,7 @@ class ServerConnection extends Connection {
      */
     @Override
     protected void sendRaw( InetSocketAddress recipient, PacketBuffer buffer ) {
-        this.bytesSend.addAndGet( buffer.getPosition() - (long) buffer.getBufferOffset() );
+        this.bytesSend.addAndGet( buffer.getWritePosition() );
         this.server.send( recipient, buffer );
     }
 
@@ -90,7 +90,7 @@ class ServerConnection extends Connection {
     @Override
     protected boolean handleDatagram0( InetSocketAddress sender, PacketBuffer datagram, long time ) {
         // Handle special internal packets:
-        byte packetId = datagram.getBuffer()[0];
+        byte packetId = datagram.getBuffer().getByte(0);
         switch ( packetId ) {
             case OPEN_CONNECTION_REQUEST_1:
                 this.handlePreConnectionRequest1( sender, datagram );
@@ -112,7 +112,7 @@ class ServerConnection extends Connection {
     @Override
     protected boolean handlePacket0( EncapsulatedPacket packet ) {
         // Handle special internal packets:
-        byte packetId = packet.getPacketData()[0];
+        byte packetId = packet.getPacketData().getByte(0);
         switch ( packetId ) {
             case CONNECTION_REQUEST:
                 this.handleConnectionRequest( packet );
@@ -222,7 +222,7 @@ class ServerConnection extends Connection {
     private void handleConnectionRequest( EncapsulatedPacket packet ) {
         this.setState( ConnectionState.CONNECTING );
 
-        PacketBuffer buffer = new PacketBuffer( packet.getPacketData(), 0 );
+        PacketBuffer buffer = new PacketBuffer( packet.getPacketData() );
         buffer.skip( 1 );                               // Packet ID
         if ( this.getGuid() != buffer.readLong() ) {    // Client GUID
             this.setState( ConnectionState.UNCONNECTED );
@@ -347,7 +347,7 @@ class ServerConnection extends Connection {
         buffer.writeLong( System.currentTimeMillis() );             // Current Time (used for latency detection)
 
         // Send to client reliably!
-        this.send( PacketReliability.RELIABLE, 0, buffer.getBuffer(), 0, buffer.getPosition() );
+        this.send( PacketReliability.RELIABLE, 0, buffer );
     }
 
     private void sendConnectionRequestFailed() {

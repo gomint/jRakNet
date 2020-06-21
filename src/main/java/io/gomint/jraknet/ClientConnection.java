@@ -114,7 +114,7 @@ class ClientConnection extends Connection {
         this.lastPingTime = time;
 
         // Handle special internal packets:
-        byte packetId = datagram.getBuffer()[0];
+        byte packetId = datagram.getBuffer().getByte(0);
         switch ( packetId ) {
             case OPEN_CONNECTION_REPLY_1:
                 this.handlePreConnectionReply1( sender, datagram );
@@ -139,7 +139,7 @@ class ClientConnection extends Connection {
     @Override
     protected boolean handlePacket0( EncapsulatedPacket packet ) {
         // Handle special internal packets:
-        byte packetId = packet.getPacketData()[0];
+        byte packetId = packet.getPacketData().getByte(0);
         if ( packetId == CONNECTION_REQUEST_ACCEPTED ) {
             this.handleConnectionRequestAccepted( packet );
             return true;
@@ -230,7 +230,7 @@ class ClientConnection extends Connection {
     }
 
     private void handleConnectionRequestAccepted( EncapsulatedPacket packet ) {
-        PacketBuffer buffer = new PacketBuffer( packet.getPacketData(), 0 );
+        PacketBuffer buffer = new PacketBuffer( packet.getPacketData() );
         buffer.skip( 1 );                                                                       // Packet ID
         buffer.readAddress();                                                                   // Client Address
         buffer.readUShort();                                                                    // Remote System Index (not always applicable)
@@ -291,7 +291,7 @@ class ClientConnection extends Connection {
         buffer.writeLong( System.currentTimeMillis() );         // Ping Time
         buffer.writeBoolean( false );                           // Security Enabled
 
-        this.send( PacketReliability.RELIABLE_ORDERED, 0, buffer.getBuffer(), buffer.getBufferOffset(), buffer.getPosition() - buffer.getBufferOffset() );
+        this.send( PacketReliability.RELIABLE_ORDERED, 0, buffer );
     }
 
     private void sendNewIncomingConnection( long pingTime ) {
@@ -304,7 +304,7 @@ class ClientConnection extends Connection {
         buffer.writeLong( pingTime );
         buffer.writeLong( System.currentTimeMillis() );
 
-        this.send( PacketReliability.RELIABLE_ORDERED, 0, buffer.getBuffer() );
+        this.send( PacketReliability.RELIABLE_ORDERED, 0, buffer );
     }
 
 }

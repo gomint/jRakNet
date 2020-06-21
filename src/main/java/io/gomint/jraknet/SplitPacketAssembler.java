@@ -1,5 +1,8 @@
 package io.gomint.jraknet;
 
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.PooledByteBufAllocator;
+
 /**
  * @author BlackyPaw
  * @version 1.0
@@ -34,15 +37,15 @@ class SplitPacketAssembler {
             cursor += part.getPacketLength();
         }
 
-        byte[] data = new byte[cursor];
-        cursor = 0;
+        ByteBuf buf = PooledByteBufAllocator.DEFAULT.directBuffer(cursor);
         for ( EncapsulatedPacket part : this.parts ) {
-            System.arraycopy( part.getPacketData(), 0, data, cursor, part.getPacketLength() );
-            cursor += part.getPacketLength();
+            buf.writeBytes(part.getPacketData());
+            part.release(); // We wrote all content into another buffer, release the parted one
         }
 
         EncapsulatedPacket packet = new EncapsulatedPacket( this.parts[0] );
-        packet.setPacketData( data );
+        packet.setPacketData( buf );
+        buf.release(); // The encapsulated packet took over ownership of this buffer, we get out of here
         packet.setSplitPacketCount( 0L );
         packet.setSplitPacketId( 0 );
         packet.setSplitPacketIndex( 0L );

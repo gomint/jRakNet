@@ -2,6 +2,8 @@ package io.gomint.jraknet;
 
 import static io.gomint.jraknet.RakNetConstraints.NUM_ORDERING_CHANNELS;
 
+import io.netty.buffer.ByteBuf;
+
 /**
  * Internal class used for buffering encapsulated packet data. Usually not returned to end users.
  *
@@ -20,7 +22,7 @@ public class EncapsulatedPacket {
     private long splitPacketCount = 0;
     private int splitPacketId = 0;
     private long splitPacketIndex = 0;
-    private byte[] packetData = null;
+    private ByteBuf packetData = null;
 
     private long weight;
     private long nextExecution;
@@ -39,7 +41,7 @@ public class EncapsulatedPacket {
         this.splitPacketCount = other.splitPacketCount;
         this.splitPacketId = other.splitPacketId;
         this.splitPacketIndex = other.splitPacketIndex;
-        this.packetData = other.packetData;
+        this.packetData = other.packetData == null ? null : other.packetData.retain();
     }
 
     /**
@@ -104,8 +106,10 @@ public class EncapsulatedPacket {
             return false;
         }
 
-        this.packetData = new byte[packetLength];
-        buffer.readBytes( packetData );
+        if (packetLength <= buffer.getRemaining()) {
+            this.packetData = buffer.readSlice(packetLength);
+            buffer.setReadPosition(buffer.getReadPosition() + packetLength);
+        }
 
         return true;
     }
@@ -194,7 +198,7 @@ public class EncapsulatedPacket {
     }
 
     public int getPacketLength() {
-        return this.packetData.length;
+        return this.packetData.readableBytes();
     }
 
     public int getReliableMessageNumber() {
@@ -253,12 +257,16 @@ public class EncapsulatedPacket {
         this.splitPacketIndex = splitPacketIndex;
     }
 
-    public byte[] getPacketData() {
+    public ByteBuf getPacketData() {
         return packetData;
     }
 
-    public void setPacketData( byte[] packetData ) {
-        this.packetData = packetData;
+    public void setPacketData( ByteBuf packetData ) {
+        if (this.packetData != null) {
+            this.packetData.release();
+        }
+
+        this.packetData = packetData == null ? null : packetData.retain();
     }
 
     public long getWeight() {
@@ -293,6 +301,11 @@ public class EncapsulatedPacket {
     @Override
     public int hashCode() {
         return this.reliableMessageNumber;
+    }
+
+    public void release() {
+        this.packetData.release();
+        this.packetData = null;
     }
 
 }

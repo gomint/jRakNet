@@ -89,6 +89,8 @@ public class ClientSocket extends Socket {
                     // Push datagram to update queue:
                     handleDatagram( sender, content, System.currentTimeMillis() );
                 }
+
+                content.release();
             }
         } );
 
@@ -202,7 +204,7 @@ public class ClientSocket extends Socket {
     @Override
     protected boolean receiveDatagram( InetSocketAddress sender, PacketBuffer datagram ) {
         // Check if this might be an unconnected pong:
-        byte packetId = datagram.getBuffer()[0];
+        byte packetId = datagram.getBuffer().getByte(0);
         if ( packetId == UNCONNECTED_PONG ) {
             this.handleUnconnectedPong( sender, datagram );
             return true;
@@ -235,21 +237,9 @@ public class ClientSocket extends Socket {
      * @param buffer    The buffer to transmit
      */
     void send( InetSocketAddress recipient, PacketBuffer buffer ) {
-        this.send( recipient, buffer.getBuffer(), buffer.getBufferOffset(), buffer.getPosition() - buffer.getBufferOffset() );
-    }
-
-    /**
-     * Sends the given data to the specified recipient immediately, i.e. without caching nor any form of
-     * transmission control (reliability, resending, etc.)
-     *
-     * @param recipient The recipient of the data
-     * @param buffer    The buffer holding the data to send
-     * @param offset    The offset into the buffer
-     * @param length    The length of the data chunk to send
-     */
-    void send( InetSocketAddress recipient, byte[] buffer, int offset, int length ) {
         if ( this.channel != null ) {
-            this.flush( new Flusher.FlushItem( this.channel, new DatagramPacket( Unpooled.wrappedBuffer( buffer, offset, length ), recipient ) ) );
+            this.flush( new Flusher.FlushItem( this.channel, new DatagramPacket( buffer.getBuffer().retain(), recipient ) ) );
+            buffer.release();
         }
     }
 

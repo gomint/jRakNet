@@ -123,6 +123,8 @@ public class ServerSocket extends Socket {
                     // Push datagram to update queue:
                     handleDatagram( sender, content, System.currentTimeMillis() );
                 }
+
+                content.release();
             }
         } );
 
@@ -187,7 +189,7 @@ public class ServerSocket extends Socket {
     @Override
     protected boolean receiveDatagram( InetSocketAddress sender, PacketBuffer datagram ) {
         // Handle unconnected pings:
-        byte packetId = datagram.getBuffer()[0];
+        byte packetId = datagram.getBuffer().getByte(0);
 
         if ( packetId == UNCONNECTED_PING ) {
             this.handleUnconnectedPing( sender, datagram );
@@ -252,21 +254,9 @@ public class ServerSocket extends Socket {
      * @param buffer    The buffer to transmit
      */
     void send( InetSocketAddress recipient, PacketBuffer buffer ) {
-        this.send( recipient, buffer.getBuffer(), buffer.getBufferOffset(), buffer.getPosition() - buffer.getBufferOffset() );
-    }
-
-    /**
-     * Sends the given data to the specified recipient immediately, i.e. without caching nor any form of
-     * transmission control (reliability, resending, etc.)
-     *
-     * @param recipient The recipient of the data
-     * @param buffer    The buffer holding the data to send
-     * @param offset    The offset into the buffer
-     * @param length    The length of the data chunk to send
-     */
-    private void send( InetSocketAddress recipient, byte[] buffer, int offset, int length ) {
         if ( this.channel != null ) {
-            this.flush( new Flusher.FlushItem( this.channel, new DatagramPacket( Unpooled.wrappedBuffer( buffer, offset, length ), recipient ) ) );
+            this.flush( new Flusher.FlushItem( this.channel, new DatagramPacket( buffer.getBuffer().retain(), recipient ) ) );
+            buffer.release();
         }
     }
 
@@ -378,7 +368,7 @@ public class ServerSocket extends Socket {
             // Only construct a new server connection if this datagram contains
             // a valid OPEN_CONNECTION_REQUEST_1 packet as this might be a discarded
             // or invalid connection receive otherwise:
-            byte packetId = datagram.getBuffer()[0];
+            byte packetId = datagram.getBuffer().getByte(0);
             if ( packetId == OPEN_CONNECTION_REQUEST_1 ) {
                 this.getImplementationLogger().trace( "Generated new server connection for {}", sender );
 
