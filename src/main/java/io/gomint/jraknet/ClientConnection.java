@@ -260,7 +260,8 @@ class ClientConnection extends Connection {
         buffer.writeByte( this.client.mojangModificationEnabled ? RAKNET_PROTOCOL_VERSION_MOJANG : RAKNET_PROTOCOL_VERSION );
 
         // Simulate filling with zeroes, in order to "test out" maximum MTU size:
-        buffer.skip( mtuSize - ( 2 + RakNetConstraints.OFFLINE_MESSAGE_DATA_ID.length + RakNetConstraints.DATA_HEADER_BYTE_LENGTH) );
+        byte[] data = new byte[mtuSize - ( 2 + RakNetConstraints.OFFLINE_MESSAGE_DATA_ID.length + RakNetConstraints.DATA_HEADER_BYTE_LENGTH)];
+        buffer.writeBytes( data );
 
         try {
             this.sendRaw( recipient, buffer );
