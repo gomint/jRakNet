@@ -26,7 +26,7 @@ public class PacketBuffer {
   private static final BigInteger UNSIGNED_LONG_MAX_VALUE = new BigInteger("FFFFFFFFFFFFFFFF", 16);
   private static final short AF_INET6 = (short) (System.getProperty("os.name").equals("windows")
       ? 23 : 10);
-  private static final int MAX_SIZE = 1024*1024;
+  private static final int MAX_SIZE = 10*1024*1024;
 
   private ByteBuf buf;
 
