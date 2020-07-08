@@ -889,14 +889,17 @@ public abstract class Connection {
                 this.slidingWindow.onACK( time - packet.getSendTime() );
             }
 
-            // Enforce deletion on next interaction:
-            packet.setNextExecution( 0L );
+            // Ensure that this packet doesn't get resend anymore
             this.resendBuffer.remove( packet.getReliableMessageNumber() );
 
+            // Track this event in stats
             this.packetsACKed++;
             this.unackedBytes.addAndGet( -( packet.getHeaderLength() + packet.getPacketLength() ) );
 
             this.getImplementationLogger().trace( "Removing packet {} due to client ACK - remaining unacked bytes: {}", node.getReliableMessageNumber(), this.unackedBytes );
+
+            // Mark this for deletion by ticker thread
+            packet.setNextExecution( 0L );
 
             // Track RTT
             this.rttLock.lock();
