@@ -115,12 +115,14 @@ public class SlidingWindow {
                 this.threshold = this.maxMTU;
             }
 
-            this.cwnd = this.maxMTU;
+            this.cwnd = this.maxMTU * 2;
         }
     }
 
     public int getReTransmissionBandwidth( int unackedBytes ) {
-        return unackedBytes; // Allow to resend all bytes in one go
+        // Allow up to 80% of the current window to be spent on resend
+        int max = (int) (this.cwnd * 0.8f);
+        return Math.min(max, unackedBytes);
     }
 
 }
