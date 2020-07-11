@@ -198,7 +198,7 @@ public class EncapsulatedPacket {
     }
 
     public int getPacketLength() {
-        return this.packetData.readableBytes();
+        return this.packetData.asReadOnly().readerIndex(0).readableBytes();
     }
 
     public int getReliableMessageNumber() {
