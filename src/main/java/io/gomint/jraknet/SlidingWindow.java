@@ -30,12 +30,11 @@ public class SlidingWindow {
     }
 
     public int getTransmissionBandwidth( int unackedBytes ) {
-        return Integer.MAX_VALUE;
-        /*if ( unackedBytes <= this.cwnd ) {
+        if ( unackedBytes <= this.cwnd ) {
             return this.cwnd - unackedBytes;
         }
 
-        return 0;*/
+        return 0;
     }
 
     public void onNAK() {
@@ -82,8 +81,8 @@ public class SlidingWindow {
             return MAX_THRESHOLD;
         }
 
-        double u = 3.0;
-        double q = 5.0;
+        double u = 2.0;
+        double q = 4.0;
 
         long threshhold = (long) ( u * this.estimatedRTT + q * this.deviationRTT ) + ADDITIONAL_VARIANCE;
         if ( threshhold > MAX_THRESHOLD ) {
