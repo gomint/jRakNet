@@ -109,7 +109,7 @@ public abstract class Connection {
     private BlockingQueue<EncapsulatedPacket> receiveBuffer;
 
     // Sending
-    private Deque<EncapsulatedPacket> sendBuffer;
+    private Queue<EncapsulatedPacket> sendBuffer;
     private AtomicInteger nextReliableMessageNumber = new AtomicInteger( 0 );
     private int nextSplitPacketID;
     private List<TriadRange> outgoingACKs;
@@ -570,7 +570,7 @@ public abstract class Connection {
         this.receiveBuffer = new LinkedBlockingQueue<>();
         this.outgoingACKs = new ArrayList<>( 128 );
         this.outgoingNAKs = new ArrayList<>( 128 );
-        this.sendBuffer = new ConcurrentLinkedDeque<>();
+        this.sendBuffer = new ConcurrentLinkedQueue<>();
         this.resendBuffer = new FixedSizeRRBuffer<>( 512 );
         this.resendQueue = new ConcurrentLinkedQueue<>();
         this.datagramContentBuffer = new FixedSizeRRBuffer<>( 512 );
@@ -702,7 +702,7 @@ public abstract class Connection {
         int currentSendBytes = 0;
 
         while ( !this.sendBuffer.isEmpty() && this.resendBuffer.get( this.nextReliableMessageNumber.get() ) == null ) {
-            EncapsulatedPacket packet = this.sendBuffer.poll();
+            EncapsulatedPacket packet = this.sendBuffer.peek();
             if ( packet == null ) {
                 continue;
             }
@@ -710,10 +710,12 @@ public abstract class Connection {
             // Check for max transmission limit
             currentSendBytes += packet.getHeaderLength() + packet.getPacketLength();
             if ( currentSendBytes > maxTransmission ) {
-                this.sendBuffer.offerFirst( packet );
                 this.getImplementationLogger().trace( "Stopped sending new data due to limit {} > {}", currentSendBytes, maxTransmission );
                 break;
             }
+
+            // We consume this now since we send it
+            this.sendBuffer.remove();
 
             // Add message numbers
             PacketReliability reliability = packet.getReliability();
@@ -758,6 +760,8 @@ public abstract class Connection {
             this.getImplementationLogger().trace( "Not updating, not in reliable state" );
             return true;
         }
+
+        this.getImplementationLogger().trace("Last packet gotten: {} ms", time - this.lastReceivedPacket);
 
         this.sendACKs();
         this.sendNAKs();
@@ -972,7 +976,8 @@ public abstract class Connection {
                 // Serialize ACKs into buffer and remove them afterwards:
                 int count = buffer.writeTriadRangeList( this.outgoingACKs, 0, this.outgoingACKs.size(), maxSize );
                 for ( int i = 0; i < count; i++ ) {
-                    this.outgoingACKs.remove( 0 );
+                    TriadRange range = this.outgoingACKs.remove( 0 );
+                    this.getImplementationLogger().trace("Wrote ACK for datagrams {} to {}", range.getMin(), range.getMax());
                 }
             }
         } finally {
@@ -1011,7 +1016,8 @@ public abstract class Connection {
                 // Serialize ACKs into buffer and remove them afterwards:
                 int count = buffer.writeTriadRangeList( this.outgoingNAKs, 0, this.outgoingNAKs.size(), maxSize );
                 for ( int i = 0; i < count; i++ ) {
-                    this.outgoingNAKs.remove( 0 );
+                    TriadRange range = this.outgoingNAKs.remove( 0 );
+                    this.getImplementationLogger().trace("Wrote NAK for datagrams {} to {}", range.getMin(), range.getMax());
                 }
             }
         } finally {
@@ -1069,21 +1075,22 @@ public abstract class Connection {
         }
 
         int datagramSequenceNumber = buffer.readTriad();
+        this.getImplementationLogger().trace("Got datagram with seq {}", datagramSequenceNumber);
+
         int skippedMessageCount = 0;
         if ( datagramSequenceNumber == this.expectedDatagramSequenceNumber ) {
             this.expectedDatagramSequenceNumber++;
         } else if ( datagramSequenceNumber > this.expectedDatagramSequenceNumber ) {
-            this.expectedDatagramSequenceNumber = datagramSequenceNumber + 1;
             skippedMessageCount = ( datagramSequenceNumber - this.expectedDatagramSequenceNumber );
+            this.expectedDatagramSequenceNumber = datagramSequenceNumber + 1;
         }
 
         // NAK all datagrams missing in between:
         if ( skippedMessageCount > 0 ) {
             this.getImplementationLogger().trace( "Sending NAK for {} skipped messages", skippedMessageCount );
-
             this.sendingNAKsLock.lock();
             try {
-                this.outgoingNAKs.add( new TriadRange( datagramSequenceNumber - skippedMessageCount, datagramSequenceNumber ) );
+                this.outgoingNAKs.add( new TriadRange( datagramSequenceNumber - skippedMessageCount, datagramSequenceNumber - 1 ) );
             } finally {
                 this.sendingNAKsLock.unlock();
             }
@@ -1124,6 +1131,8 @@ public abstract class Connection {
                 int holes = ( packet.getReliableMessageNumber() - this.expectedReliableMessageNumber );
 
                 if ( holes > 0 ) {
+                    this.getImplementationLogger().trace("Missing {} reliable packet messages", holes);
+
                     if ( holes < this.reliableMessageQueue.size() ) {
                         if ( this.reliableMessageQueue.get( holes ) ) {
                             this.reliableMessageQueue.set( holes, false );

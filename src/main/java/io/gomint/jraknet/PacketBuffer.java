@@ -2,10 +2,8 @@ package io.gomint.jraknet;
 
 import io.gomint.jraknet.datastructures.TriadRange;
 import io.netty.buffer.ByteBuf;
-
 import io.netty.buffer.PooledByteBufAllocator;
-import io.netty.util.ReferenceCountUtil;
-import java.lang.ref.Cleaner;
+
 import java.math.BigInteger;
 import java.net.Inet4Address;
 import java.net.Inet6Address;
@@ -13,7 +11,6 @@ import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
@@ -275,7 +272,7 @@ public class PacketBuffer {
   }
 
   public TriadRange[] readTriadRangeList() {
-    int length = this.readUShort();
+    short length = this.readShort();
     boolean isPair;
     TriadRange[] ranges = new TriadRange[length];
     int min;
@@ -449,7 +446,7 @@ public class PacketBuffer {
     this.buf.writerIndex(this.buf.writerIndex() + 2);
     maxSize -= 2;
 
-    int count = 0;
+    short count = 0;
     for (int i = offset; i < offset + length; ++i) {
       if (ranges.get(i).getMin() == ranges.get(i).getMax()) {
         if (maxSize < 4) {
@@ -474,7 +471,7 @@ public class PacketBuffer {
 
     int pos = this.buf.writerIndex();
     this.buf.resetWriterIndex();
-    this.writeUShort(count);
+    this.writeShort(count);
     this.buf.writerIndex(pos);
     return count;
   }
@@ -512,4 +509,16 @@ public class PacketBuffer {
   public void readBytes(byte[] v) {
     this.buf.readBytes(v);
   }
+
+  @Override
+  public String toString() {
+    StringBuilder data = new StringBuilder();
+    ByteBuf buf = this.buf.asReadOnly().readerIndex(0);
+    for (int i = 0; i < buf.readableBytes(); i++) {
+      data.append("0x").append(Integer.toHexString(buf.readByte())).append(" ");
+    }
+
+    return "PacketBuffer[" + data + "]";
+  }
+
 }

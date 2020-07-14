@@ -153,7 +153,7 @@ public class EncapsulatedPacket {
             buffer.writeUInt( this.splitPacketIndex ); // 4 | 23
         }
 
-        buffer.writeBytes( this.packetData );
+        buffer.writeBytes( this.packetData.asReadOnly().readerIndex(0) );
 
         this.sendTime = time;
     }

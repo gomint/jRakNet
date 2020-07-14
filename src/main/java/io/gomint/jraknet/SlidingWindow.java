@@ -30,11 +30,12 @@ public class SlidingWindow {
     }
 
     public int getTransmissionBandwidth( int unackedBytes ) {
-        if ( unackedBytes <= this.cwnd ) {
+        return Integer.MAX_VALUE;
+        /*if ( unackedBytes <= this.cwnd ) {
             return this.cwnd - unackedBytes;
         }
 
-        return 0;
+        return 0;*/
     }
 
     public void onNAK() {
@@ -81,8 +82,8 @@ public class SlidingWindow {
             return MAX_THRESHOLD;
         }
 
-        double u = 2.0;
-        double q = 4.0;
+        double u = 3.0;
+        double q = 5.0;
 
         long threshhold = (long) ( u * this.estimatedRTT + q * this.deviationRTT ) + ADDITIONAL_VARIANCE;
         if ( threshhold > MAX_THRESHOLD ) {
@@ -120,9 +121,7 @@ public class SlidingWindow {
     }
 
     public int getReTransmissionBandwidth( int unackedBytes ) {
-        // Allow up to 80% of the current window to be spent on resend
-        int max = (int) (this.cwnd * 0.8f);
-        return Math.min(max, unackedBytes);
+        return unackedBytes;
     }
 
 }
