@@ -28,7 +28,7 @@ public class PacketBuffer {
   private ByteBuf buf;
 
   public PacketBuffer(int capacity) {
-    this(PooledByteBufAllocator.DEFAULT.directBuffer(capacity));
+    this.buf = PooledByteBufAllocator.DEFAULT.directBuffer(capacity);
   }
 
   public PacketBuffer(ByteBuf buf) {
