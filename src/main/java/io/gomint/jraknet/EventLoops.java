@@ -15,13 +15,12 @@ import java.util.concurrent.ThreadFactory;
  */
 public class EventLoops {
 
-    static final ScheduledExecutorService TICKER = Executors.newScheduledThreadPool( 2, new ThreadFactory() {
-        @Override
-        public Thread newThread( Runnable r ) {
-            return new Thread( r, "jRaknet Ticker" );
-        }
-    } );
-    static final EventLoopGroup LOOP_GROUP = Epoll.isAvailable() ? new EpollEventLoopGroup() : new NioEventLoopGroup();
+    static final ScheduledExecutorService TICKER = Executors.newScheduledThreadPool( 2, r -> new Thread( r, "jRaknet Ticker" ));
+    static final EventLoopGroup LOOP_GROUP = Epoll.isAvailable() ? new EpollEventLoopGroup(0, r -> {
+        return new Thread( r, "jRaknet events" );
+    }) : new NioEventLoopGroup(0, r -> {
+        return new Thread( r, "jRaknet events" );
+    });
     static final Flusher FLUSHER = new Flusher( EventLoops.LOOP_GROUP.next() );
 
     public static void cleanup() {
