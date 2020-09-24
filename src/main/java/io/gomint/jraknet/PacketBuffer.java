@@ -156,7 +156,7 @@ public class PacketBuffer {
     }
 
     public int readSignedVarInt() {
-        long val = readUnsignedVarLong();
+        int val = readUnsignedVarInt();
         return decodeZigZag32(val);
     }
 
@@ -198,13 +198,13 @@ public class PacketBuffer {
         throw new IllegalArgumentException("Var Number too big");
     }
 
-    private long encodeZigZag32(int v) {
+    private int encodeZigZag32(int v) {
         // Note:  the right-shift must be arithmetic
         return (v << 1) ^ (v >> 31);
     }
 
-    private int decodeZigZag32(long v) {
-        return (int) (v >> 1) ^ -(int) (v & 1);
+    private int decodeZigZag32(int v) {
+        return (v >> 1) ^ -(v & 1);
     }
 
     private BigInteger encodeZigZag64(long v) {
@@ -245,8 +245,8 @@ public class PacketBuffer {
     }
 
     public void writeSignedVarInt(int value) {
-        long signedValue = encodeZigZag32(value);
-        writeUnsignedVarLong(signedValue);
+        int signedValue = encodeZigZag32(value);
+        writeUnsignedVarInt(signedValue);
     }
 
     private void writeVarBigInteger(BigInteger value) {
