@@ -428,6 +428,7 @@ public abstract class Connection {
         if ( this.isConnecting() && this.connectingStart + 30000L < time ) {
             this.getImplementationLogger().warn( "Connection with {} has been reset: Connect timeout (30s)", this.address );
             this.reset();
+            this.setState(ConnectionState.UNCONNECTED);
         }
     }
 
@@ -440,14 +441,6 @@ public abstract class Connection {
      */
     protected void postUpdate( long time ) {
         if ( time > this.nextPacketLossCheck ) {
-            if ( this.packetsNAKed > 0 ) {
-                int totalPackets = this.packetsACKed + this.packetsNAKed;
-
-                this.getImplementationLogger().warn( "Packet loss detected: {}% | Resend queue: {} | ACK: {} | NAK: {} | RTT: {}",
-                        String.format( "%.03f", ( this.packetsNAKed / (double) totalPackets ) * 100 ), this.resendQueue.size(),
-                        this.packetsACKed, this.packetsNAKed, this.rtt );
-            }
-
             this.packetsNAKed = 0;
             this.packetsACKed = 0;
             this.nextPacketLossCheck = time + 1000;
@@ -518,10 +511,6 @@ public abstract class Connection {
     protected final void setState( ConnectionState state ) {
         ConnectionState previousState = this.state;
         this.state = state;
-
-        if ( this.getImplementationLogger() != null ) {
-            this.getImplementationLogger().trace( "Setting connection state to {} for {}", state, this.getAddress() );
-        }
 
         switch ( this.state ) {
             case UNCONNECTED:

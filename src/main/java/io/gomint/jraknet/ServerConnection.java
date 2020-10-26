@@ -67,10 +67,6 @@ class ServerConnection extends Connection {
      */
     @Override
     protected Logger getImplementationLogger() {
-        if ( this.server == null ) {
-            return null;
-        }
-
         return this.server.getImplementationLogger();
     }
 
