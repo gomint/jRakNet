@@ -3,11 +3,24 @@ package io.gomint.jraknet;
 import org.slf4j.Logger;
 
 import java.io.IOException;
-import java.net.DatagramPacket;
 import java.net.InetSocketAddress;
-import java.net.SocketAddress;
 
-import static io.gomint.jraknet.RakNetConstraints.*;
+import static io.gomint.jraknet.RakNetConstraints.ALREADY_CONNECTED;
+import static io.gomint.jraknet.RakNetConstraints.CONNECTION_REQUEST;
+import static io.gomint.jraknet.RakNetConstraints.CONNECTION_REQUEST_ACCEPTED;
+import static io.gomint.jraknet.RakNetConstraints.CONNECTION_REQUEST_FAILED;
+import static io.gomint.jraknet.RakNetConstraints.CONNECTION_TIMEOUT_MILLIS;
+import static io.gomint.jraknet.RakNetConstraints.MAXIMUM_MTU_SIZE;
+import static io.gomint.jraknet.RakNetConstraints.MAX_LOCAL_IPS;
+import static io.gomint.jraknet.RakNetConstraints.MINIMUM_MTU_SIZE;
+import static io.gomint.jraknet.RakNetConstraints.NEW_INCOMING_CONNECTION;
+import static io.gomint.jraknet.RakNetConstraints.NO_FREE_INCOMING_CONNECTIONS;
+import static io.gomint.jraknet.RakNetConstraints.OPEN_CONNECTION_REPLY_1;
+import static io.gomint.jraknet.RakNetConstraints.OPEN_CONNECTION_REPLY_2;
+import static io.gomint.jraknet.RakNetConstraints.OPEN_CONNECTION_REQUEST_1;
+import static io.gomint.jraknet.RakNetConstraints.OPEN_CONNECTION_REQUEST_2;
+import static io.gomint.jraknet.RakNetConstraints.RAKNET_PROTOCOL_VERSION;
+import static io.gomint.jraknet.RakNetConstraints.RAKNET_PROTOCOL_VERSION_MOJANG;
 
 /**
  * @author BlackyPaw
@@ -15,267 +28,284 @@ import static io.gomint.jraknet.RakNetConstraints.*;
  */
 class ClientConnection extends Connection {
 
-	// References
-	private final ClientSocket client;
+    // References
+    private final ClientSocket client;
 
-	// Pre-Connection attempts:
-	private int connectionAttempts;
-	private long lastConnectionAttempt;
+    // Pre-Connection attempts:
+    private int connectionAttempts;
+    private long lastConnectionAttempt;
 
-	public ClientConnection( ClientSocket client, InetSocketAddress address, ConnectionState initialState ) {
-		super( address, initialState );
-		this.client = client;
-		this.connectionAttempts = 0;
-		this.lastConnectionAttempt = 0L;
-	}
+    public ClientConnection( ClientSocket client, InetSocketAddress address ) {
+        super( address, ConnectionState.INITIALIZING );
+        this.client = client;
+        this.connectionAttempts = 0;
+        this.lastConnectionAttempt = System.currentTimeMillis();
 
-	// ================================ CONNECTION ================================ //
+        this.sendPreConnectionRequest1( address, MAXIMUM_MTU_SIZE );
+    }
 
-	@Override
-	protected void sendRaw( InetSocketAddress recipient, PacketBuffer buffer ) throws IOException {
-		this.client.send( recipient, buffer );
-	}
+    // ================================ CONNECTION ================================ //
 
-	@Override
-	protected Logger getImplementationLogger() {
-		return this.client.getImplementationLogger();
-	}
+    @Override
+    protected void sendRaw( InetSocketAddress recipient, PacketBuffer buffer ) throws IOException {
+        this.client.send( recipient, buffer );
+    }
 
-	@Override
-	protected void preUpdate( long time ) {
-		super.preUpdate( time );
+    @Override
+    protected Logger getImplementationLogger() {
+        if ( this.client == null ) {
+            return null;
+        }
 
-		if ( this.connectionAttempts > 10 ) {
-			// Nothing to update anymore
-			return;
-		}
+        return this.client.getImplementationLogger();
+    }
 
-		if ( this.connectionAttempts == 10 ) {
-			this.propagateConnectionAttemptFailed( "Could not initialize connection" );
-			++this.connectionAttempts;
-			return;
-		}
+    @Override
+    boolean update( long time ) {
+        if ( this.getLastReceivedPacketTime() + CONNECTION_TIMEOUT_MILLIS < time ) {
+            this.getImplementationLogger().trace( "Read timed out" );
+            this.notifyTimeout();
+            return false;
+        }
 
-		// Send out pre-connection attempts:
-		if ( this.lastConnectionAttempt + 1000L < time ) {
-			int mtuSize = ( this.connectionAttempts < 5 ? MAXIMUM_MTU_SIZE : ( this.connectionAttempts < 8 ? 1200 : 576 ) );
-			this.sendPreConnectionRequest1( this.getAddress(), mtuSize );
+        return super.update( time );
+    }
 
-			++this.connectionAttempts;
-			this.lastConnectionAttempt = time;
-		}
-	}
+    @Override
+    void notifyRemoval() {
+        this.client.removeConnection();
+        super.notifyRemoval();
+    }
 
-	@Override
-	protected boolean handleDatagram0( InetSocketAddress sender, PacketBuffer datagram, long time ) {
-		this.lastPingTime = time;
+    @Override
+    protected void preUpdate( long time ) {
+        super.preUpdate( time );
 
-		// Handle special internal packets:
-		byte packetId = datagram.getBuffer()[0];
-		switch ( packetId ) {
-			case OPEN_CONNECTION_REPLY_1:
-				this.handlePreConnectionReply1( sender, datagram );
-				return true;
-			case OPEN_CONNECTION_REPLY_2:
-				this.handlePreConnectionReply2( sender, datagram );
-				return true;
-			case ALREADY_CONNECTED:
-				this.handleAlreadyConnected( sender, datagram );
-				return true;
-			case NO_FREE_INCOMING_CONNECTIONS:
-				this.handleNoFreeIncomingConnections( sender, datagram );
-				return true;
-			case CONNECTION_REQUEST_FAILED:
-				this.handleConnectionRequestFailed( sender, datagram );
-				return true;
-		}
-		return false;
-	}
+        if ( this.connectionAttempts > 10 ) {
+            // Nothing to update anymore
+            return;
+        }
 
-	@Override
-	protected boolean handlePacket0( EncapsulatedPacket packet ) {
-		// Handle special internal packets:
-		byte packetId = packet.getPacketData()[0];
-		switch ( packetId ) {
-			case CONNECTION_REQUEST_ACCEPTED:
-				this.handleConnectionRequestAccepted( packet );
-				return true;
-		}
-		return false;
-	}
+        if ( this.connectionAttempts == 10 ) {
+            this.propagateConnectionAttemptFailed( "Could not initialize connection" );
+            ++this.connectionAttempts;
+            return;
+        }
 
-	@Override
-	protected void propagateConnectionClosed() {
-		this.client.propagateConnectionClosed( this );
-	}
+        // Send out pre-connection attempts:
+        if ( this.lastConnectionAttempt + 1000L < time ) {
+            this.getImplementationLogger().trace( "Trying to connect" );
 
-	@Override
-	protected void propagateConnectionDisconnected() {
-		this.client.propagateConnectionDisconnected( this );
-	}
+            int mtuDiff = ( MAXIMUM_MTU_SIZE - MINIMUM_MTU_SIZE ) / 9;
+            int mtuSize = MAXIMUM_MTU_SIZE - ( this.connectionAttempts * mtuDiff );
+            if ( mtuSize < MINIMUM_MTU_SIZE ) {
+                mtuSize = MINIMUM_MTU_SIZE;
+            }
 
-	@Override
-	protected void propagateFullyConnected() {
-		this.client.propagateConnectionRequestSucceded( this );
-	}
+            this.sendPreConnectionRequest1( this.getAddress(), mtuSize );
 
-	private void propagateConnectionAttemptFailed( String reason ) {
-		this.client.propagateConnectionAttemptFailed( reason );
-	}
+            ++this.connectionAttempts;
+            this.lastConnectionAttempt = time;
+        }
+    }
 
-	// ================================ PACKET HANDLERS ================================ //
+    @Override
+    protected boolean handleDatagram0( InetSocketAddress sender, PacketBuffer datagram, long time ) {
+        this.lastPingTime = time;
 
-	private void handlePreConnectionReply1( InetSocketAddress sender, PacketBuffer datagram ) {
-		// Prevent further connection attempts:
-		this.connectionAttempts = 11;
+        // Handle special internal packets:
+        byte packetId = datagram.getBuffer().getByte(0);
+        switch ( packetId ) {
+            case OPEN_CONNECTION_REPLY_1:
+                this.handlePreConnectionReply1( sender, datagram );
+                return true;
+            case OPEN_CONNECTION_REPLY_2:
+                this.handlePreConnectionReply2( datagram );
+                return true;
+            case ALREADY_CONNECTED:
+                this.handleAlreadyConnected( sender, datagram );
+                return true;
+            case NO_FREE_INCOMING_CONNECTIONS:
+                this.handleNoFreeIncomingConnections( sender, datagram );
+                return true;
+            case CONNECTION_REQUEST_FAILED:
+                this.handleConnectionRequestFailed( sender, datagram );
+                return true;
+            default:
+                return false;
+        }
+    }
 
-		datagram.skip( 1 );                                       // Packet ID
-		datagram.readOfflineMessageDataId();                      // Offline Message Data ID
-		this.setGuid( datagram.readLong() );                      // Server GUID
-		boolean securityEnabled = datagram.readBoolean();         // Security Enabled
-		this.setMtuSize( datagram.readUShort() );                 // MTU Size
+    @Override
+    protected boolean handlePacket0( EncapsulatedPacket packet ) {
+        // Handle special internal packets:
+        byte packetId = packet.getPacketData().getByte(0);
+        if ( packetId == CONNECTION_REQUEST_ACCEPTED ) {
+            this.handleConnectionRequestAccepted( packet );
+            return true;
+        }
 
-		if ( securityEnabled ) {
-			// We don't support security:
-			this.setState( ConnectionState.UNCONNECTED );
-			this.propagateConnectionAttemptFailed( "Security is not supported" );
-			return;
-		}
+        return false;
+    }
 
-		this.sendPreConnectionRequest2( sender );
-	}
+    @Override
+    protected void propagateConnectionClosed() {
+        this.client.propagateConnectionClosed( this );
+    }
 
-	private void handlePreConnectionReply2( InetSocketAddress sender, PacketBuffer datagram ) {
-		if ( this.getState() != ConnectionState.INITIALIZING ) {
-			return;
-		}
+    @Override
+    protected void propagateConnectionDisconnected() {
+        this.client.propagateConnectionDisconnected( this );
+    }
 
-		datagram.skip( 1 );                                                                       // Packet ID
-		datagram.readOfflineMessageDataId();                                                      // Offline Message Data ID
-		if ( this.getGuid() != datagram.readLong() ) {                                            // Server GUID
-			this.setState( ConnectionState.UNCONNECTED );
-			this.propagateConnectionAttemptFailed( "Server send different GUIDs during pre-connect" );
-			return;
-		}
+    @Override
+    protected void propagateFullyConnected() {
+        this.client.propagateConnectionRequestSucceded( this );
+    }
 
-		this.setMtuSize( datagram.readUShort() );                                                 // MTU Size
-		@SuppressWarnings( "unused" ) boolean securityEnabled = datagram.readBoolean();           // Security Enabled
+    private void propagateConnectionAttemptFailed( String reason ) {
+        this.client.propagateConnectionAttemptFailed( reason );
+    }
 
-		/* if ( securityEnabled ) {
-			// We don't support security:
-			this.state = ConnectionState.UNCONNECTED;
-			if ( this.eventHandler != null ) {
-				SocketEvent event = new SocketEvent( SocketEvent.Type.CONNECTION_ATTEMPT_FAILED, "Security is not supported" );
-				this.eventHandler.onSocketEvent( this, event );
-			}
-			return;
-		} */
+    // ================================ PACKET HANDLERS ================================ //
 
-		this.initializeStructures();
-		this.setState( ConnectionState.RELIABLE );
+    private void handlePreConnectionReply1( InetSocketAddress sender, PacketBuffer datagram ) {
+        // Prevent further connection attempts:
+        this.connectionAttempts = 11;
 
-		this.sendConnectionRequest( sender );
-	}
+        datagram.skip( 1 );                                       // Packet ID
+        datagram.readOfflineMessageDataId();                      // Offline Message Data ID
+        this.setGuid( datagram.readLong() );                      // Server GUID
+        boolean securityEnabled = datagram.readBoolean();         // Security Enabled
+        this.setMtuSize( datagram.readUShort() );                 // MTU Size
 
-	@SuppressWarnings( "unused" )
-	private void handleAlreadyConnected( InetSocketAddress sender, PacketBuffer datagram ) {
-		this.setState( ConnectionState.UNCONNECTED );
-		this.propagateConnectionAttemptFailed( "System is already connected" );
-	}
+        if ( securityEnabled ) {
+            // We don't support security:
+            this.setState( ConnectionState.UNCONNECTED );
+            this.propagateConnectionAttemptFailed( "Security is not supported" );
+            return;
+        }
 
-	@SuppressWarnings( "unused" )
-	private void handleNoFreeIncomingConnections( InetSocketAddress sender, PacketBuffer datagram ) {
-		this.setState( ConnectionState.UNCONNECTED );
-		this.propagateConnectionAttemptFailed( "Remote peer has no free incoming connections left" );
-	}
+        this.sendPreConnectionRequest2( sender );
+    }
 
-	@SuppressWarnings( "unused" )
-	private void handleConnectionRequestFailed( InetSocketAddress sender, PacketBuffer datagram ) {
-		this.setState( ConnectionState.UNCONNECTED );
-		this.propagateConnectionAttemptFailed( "Remote peer rejected connection request" );
-	}
+    private void handlePreConnectionReply2( PacketBuffer datagram ) {
+        if ( this.getState() != ConnectionState.INITIALIZING ) {
+            return;
+        }
 
-	private void handleConnectionRequestAccepted( EncapsulatedPacket packet ) {
-		PacketBuffer buffer = new PacketBuffer( packet.getPacketData(), 0 );
-		buffer.skip( 1 );                                                                       // Packet ID
-		buffer.readAddress();                                                                   // Client Address
-		buffer.readUShort();                                                               		// Remote System Index (not always applicable)
+        datagram.skip( 1 );                                                                       // Packet ID
+        datagram.readOfflineMessageDataId();                                                      // Offline Message Data ID
+        if ( this.getGuid() != datagram.readLong() ) {                                            // Server GUID
+            this.setState( ConnectionState.UNCONNECTED );
+            this.propagateConnectionAttemptFailed( "Server send different GUIDs during pre-connect" );
+            return;
+        }
 
-		for ( int i = 0; i < MAX_LOCAL_IPS; ++i ) {
-			buffer.readAddress();                                                               // Server Local IPs
-		}
+        this.setMtuSize( datagram.readUShort() );                                                 // MTU Size
+        datagram.readBoolean();                                                                   // Security Enabled
 
-		@SuppressWarnings( "unused" ) long pingTime = buffer.readLong();                        // Ping Time
-		long pongTime = buffer.readLong();                                                      // Pong Time
+        this.initializeStructures();
+        this.setState( ConnectionState.RELIABLE );
 
-		// Send response:
-		this.sendNewIncomingConnection( pongTime );
+        this.sendConnectionRequest();
+    }
 
-		// Finally we are connected!
-		this.setState( ConnectionState.CONNECTED );
-	}
+    @SuppressWarnings( "unused" )
+    private void handleAlreadyConnected( InetSocketAddress sender, PacketBuffer datagram ) {
+        this.setState( ConnectionState.UNCONNECTED );
+        this.propagateConnectionAttemptFailed( "System is already connected" );
+    }
 
-	// ================================ PACKET SENDERS ================================ //
+    @SuppressWarnings( "unused" )
+    private void handleNoFreeIncomingConnections( InetSocketAddress sender, PacketBuffer datagram ) {
+        this.setState( ConnectionState.UNCONNECTED );
+        this.propagateConnectionAttemptFailed( "Remote peer has no free incoming connections left" );
+    }
 
-	private void sendPreConnectionRequest1( InetSocketAddress recipient, int mtuSize ) {
-		this.setState( ConnectionState.INITIALIZING );
+    @SuppressWarnings( "unused" )
+    private void handleConnectionRequestFailed( InetSocketAddress sender, PacketBuffer datagram ) {
+        this.setState( ConnectionState.UNCONNECTED );
+        this.propagateConnectionAttemptFailed( "Remote peer rejected connection request" );
+    }
 
-		PacketBuffer buffer = new PacketBuffer( MAXIMUM_MTU_SIZE );
-		buffer.writeByte( OPEN_CONNECTION_REQUEST_1 );
-		buffer.writeOfflineMessageDataId();
-		buffer.writeByte( client.mojangModificationEnabled ? RAKNET_PROTOCOL_VERSION_MOJANG : RAKNET_PROTOCOL_VERSION );
+    private void handleConnectionRequestAccepted( EncapsulatedPacket packet ) {
+        PacketBuffer buffer = new PacketBuffer( packet.getPacketData() );
+        buffer.skip( 1 );                                                                       // Packet ID
+        buffer.readAddress();                                                                   // Client Address
+        buffer.readUShort();                                                                    // Remote System Index (not always applicable)
 
-		// Simulate filling with zeroes, in order to "test out" maximum MTU size:
-		buffer.skip( mtuSize - 18 );
+        for ( int i = 0; i < MAX_LOCAL_IPS; ++i ) {
+            buffer.readAddress();                                                               // Server Local IPs
+        }
 
-		try {
-			this.sendRaw( recipient, buffer );
-		} catch ( IOException e ) {
-			// ._.
-		}
-	}
+        buffer.readLong();                                                                     // Ping Time
+        long pongTime = buffer.readLong();                                                      // Pong Time
 
-	private void sendPreConnectionRequest2( InetSocketAddress recipient ) {
-		PacketBuffer buffer = new PacketBuffer( 34 );
-		buffer.writeByte( OPEN_CONNECTION_REQUEST_2 );          // Packet ID
-		buffer.writeOfflineMessageDataId();                     // Offline Message Data ID
-		buffer.writeAddress( recipient );                       // Client Bind Address
-		buffer.writeUShort( this.getMtuSize() );                // MTU size
-		buffer.writeLong( this.client.getGuid() );              // Client GUID
+        // Send response:
+        this.sendNewIncomingConnection( pongTime );
 
-		try {
-			this.sendRaw( recipient, buffer );
-		} catch ( IOException e ) {
-			// ._.
-		}
-	}
+        // Finally we are connected!
+        this.setState( ConnectionState.CONNECTED );
+    }
 
-	private void sendConnectionRequest( @SuppressWarnings( "unused" ) InetSocketAddress recipient ) {
-		PacketBuffer buffer = new PacketBuffer( 18 );
-		buffer.writeByte( CONNECTION_REQUEST );                 // Packet ID
-		buffer.writeLong( this.client.getGuid() );              // Client GUID
-		buffer.writeLong( System.currentTimeMillis() );         // Ping Time
-		buffer.writeBoolean( false );                           // Security Enabled
+    // ================================ PACKET SENDERS ================================ //
 
-		/*                  PASSWORD HANDLING
-		String password = ...;
-		buffer.writeBytes( password.getBytes( StandardCharsets.US_ASCII ) );
-		*/
+    private void sendPreConnectionRequest1( InetSocketAddress recipient, int mtuSize ) {
+        this.setState( ConnectionState.INITIALIZING );
 
-		this.send( PacketReliability.RELIABLE_ORDERED, 0, buffer.getBuffer(), buffer.getBufferOffset(), buffer.getPosition() - buffer.getBufferOffset() );
-	}
+        PacketBuffer buffer = new PacketBuffer( MAXIMUM_MTU_SIZE );
+        buffer.writeByte( OPEN_CONNECTION_REQUEST_1 );
+        buffer.writeOfflineMessageDataId();
+        buffer.writeByte( this.client.mojangModificationEnabled ? RAKNET_PROTOCOL_VERSION_MOJANG : RAKNET_PROTOCOL_VERSION );
 
-	private void sendNewIncomingConnection( long pingTime ) {
-		PacketBuffer buffer = new PacketBuffer( 94 );
-		buffer.writeByte( NEW_INCOMING_CONNECTION );
-		buffer.writeAddress( this.getAddress() );
-		for ( int i = 0; i < MAX_LOCAL_IPS; ++i ) {
-			buffer.writeAddress( ServerConnection.LOCAL_IP_ADDRESSES[i] );
-		}
-		buffer.writeLong( pingTime );
-		buffer.writeLong( System.currentTimeMillis() );
+        // Simulate filling with zeroes, in order to "test out" maximum MTU size:
+        byte[] data = new byte[mtuSize - ( 2 + RakNetConstraints.OFFLINE_MESSAGE_DATA_ID.length + RakNetConstraints.DATA_HEADER_BYTE_LENGTH)];
+        buffer.writeBytes( data );
 
-		this.send( PacketReliability.RELIABLE_ORDERED, 0, buffer.getBuffer() );
-	}
+        try {
+            this.sendRaw( recipient, buffer );
+        } catch ( IOException e ) {
+            // ._.
+        }
+    }
+
+    private void sendPreConnectionRequest2( InetSocketAddress recipient ) {
+        PacketBuffer buffer = new PacketBuffer( 34 );
+        buffer.writeByte( OPEN_CONNECTION_REQUEST_2 );          // Packet ID
+        buffer.writeOfflineMessageDataId();                     // Offline Message Data ID
+        buffer.writeAddress( recipient );                       // Client Bind Address
+        buffer.writeUShort( this.getMtuSize() );                // MTU size
+        buffer.writeLong( this.client.getGuid() );              // Client GUID
+
+        try {
+            this.sendRaw( recipient, buffer );
+        } catch ( IOException e ) {
+            // ._.
+        }
+    }
+
+    private void sendConnectionRequest() {
+        PacketBuffer buffer = new PacketBuffer( 18 );
+        buffer.writeByte( CONNECTION_REQUEST );                 // Packet ID
+        buffer.writeLong( this.client.getGuid() );              // Client GUID
+        buffer.writeLong( System.currentTimeMillis() );         // Ping Time
+        buffer.writeBoolean( false );                           // Security Enabled
+
+        this.send( PacketReliability.RELIABLE_ORDERED, 0, buffer );
+    }
+
+    private void sendNewIncomingConnection( long pingTime ) {
+        PacketBuffer buffer = new PacketBuffer( 94 );
+        buffer.writeByte( NEW_INCOMING_CONNECTION );
+        buffer.writeAddress( this.getAddress() );
+        for ( int i = 0; i < MAX_LOCAL_IPS; ++i ) {
+            buffer.writeAddress( ServerConnection.LOCAL_IP_ADDRESSES[i] );
+        }
+        buffer.writeLong( pingTime );
+        buffer.writeLong( System.currentTimeMillis() );
+
+        this.send( PacketReliability.RELIABLE_ORDERED, 0, buffer );
+    }
 
 }

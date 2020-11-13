@@ -1,26 +1,11 @@
 package io.gomint.jraknet;
 
 import io.netty.bootstrap.Bootstrap;
-import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
-import io.netty.channel.socket.DatagramPacket;
 import org.slf4j.Logger;
 
-import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.nio.ByteBuffer;
-import java.nio.channels.DatagramChannel;
-import java.nio.channels.SelectionKey;
-import java.nio.channels.Selector;
-import java.util.Arrays;
-import java.util.Random;
-import java.util.Set;
-import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-
-import static io.gomint.jraknet.RakNetConstraints.MAXIMUM_MTU_SIZE;
 
 /**
  * @author BlackyPaw
@@ -32,12 +17,7 @@ public abstract class Socket implements AutoCloseable {
     protected Bootstrap udpSocket;
     protected Channel channel;
 
-    // Threads used for modeling network "events"
-    private ThreadFactory eventLoopFactory;
-    private Thread updateThread;
-
     // Lifecycle
-    private AtomicBoolean running = new AtomicBoolean( false );
     private SocketEventHandler eventHandler;
 
     // RakNet data:
@@ -59,22 +39,6 @@ public abstract class Socket implements AutoCloseable {
      */
     public boolean isInitialized() {
         return ( this.udpSocket != null );
-    }
-
-    /**
-     * Sets the event loop factory to be used for internal threads.
-     * <p>
-     * Must be set before the socket is somehow initialized otherwise the call will result in an
-     * IllegalStateException.
-     *
-     * @param factory The factory to be used to create internal threads
-     */
-    public void setEventLoopFactory( ThreadFactory factory ) {
-        if ( this.udpSocket != null ) {
-            throw new IllegalStateException( "Cannot set event loop factory if socket was already initialized" );
-        }
-
-        this.eventLoopFactory = factory;
     }
 
     /**
@@ -104,20 +68,8 @@ public abstract class Socket implements AutoCloseable {
      */
     @Override
     public void close() {
-        // Stop all threads safely:
-        this.running.set( false );
-
-        try {
-            this.updateThread.join();
-        } catch ( InterruptedException ignored ) {
-            // ._.
-        } finally {
-            this.updateThread = null;
-        }
-
         // Close the UDP socket:
-        this.channel.close().syncUninterruptibly();
-        this.channel.eventLoop().shutdownGracefully().syncUninterruptibly();
+        this.channel.close();
         this.channel = null;
         this.udpSocket = null;
     }
@@ -135,7 +87,7 @@ public abstract class Socket implements AutoCloseable {
      * Invoked right after a datagram was received. This method may perform very rudimentary
      * datagram handling if necessary.
      *
-     * @param sender  The channel which sent this datagram
+     * @param sender   The channel which sent this datagram
      * @param datagram The datagram that was just received
      * @return Whether or not the datagram was handled by this method already and should be processed no further
      */
@@ -147,26 +99,11 @@ public abstract class Socket implements AutoCloseable {
      * Handles the given datagram. This will be invoked on the socket's update thread and should hand
      * this datagram to the connection it belongs to in order to deserialize it appropriately.
      *
-     * @param sender  The channel which this datagram sent
+     * @param sender   The channel which this datagram sent
      * @param datagram The datagram to be handled
      * @param time     The current system time
      */
     protected abstract void handleDatagram( InetSocketAddress sender, PacketBuffer datagram, long time );
-
-    /**
-     * Updates all connections this socket created.
-     *
-     * @param time The current system time
-     */
-    protected abstract void updateConnections( long time );
-
-    /**
-     * Invoked after the update thread was stopped but right before it terminates. May perform any necessary
-     * cleanup.
-     */
-    protected void cleanupUpdateThread() {
-
-    }
 
     // ================================ INTERNALS ================================ //
 
@@ -180,19 +117,6 @@ public abstract class Socket implements AutoCloseable {
     }
 
     /**
-     * Must be invoked by the implementation right after the socket's internal datagram socket
-     * was initialized. This will initialize all internal structures and start up the socket's
-     * receive and update threads.
-     */
-    protected final void afterInitialize() {
-        // Initialize other subsystems; won't get here if bind fails as DatagramSocket's
-        // constructor will throw SocketException:
-        this.running.set( true );
-        this.initializeEventLoopFactory();
-        this.startUpdateThread();
-    }
-
-    /**
      * Propagates the given event to the socket's event handler if any such is available.
      *
      * @param event The event to be propagated
@@ -203,61 +127,14 @@ public abstract class Socket implements AutoCloseable {
         }
     }
 
-    /**
-     * Initializes the socket's event loop factory if it does not yet have one set.
-     */
-    private void initializeEventLoopFactory() {
-        if ( this.eventLoopFactory != null ) {
-            return;
+    protected void flush( Flusher.FlushItem item ) {
+        if ( getImplementationLogger().isTraceEnabled() ) {
+            PacketBuffer content = new PacketBuffer( item.request.content().copy() );
+            getImplementationLogger().trace("<OUT {}", content );
         }
 
-        // Construct default event loop factory:
-        this.eventLoopFactory = new ThreadFactory() {
-            private ThreadGroup group = new ThreadGroup( "jRakNet-ServerSocket" );
-            private AtomicInteger id = new AtomicInteger( 0 );
-
-            public Thread newThread( Runnable r ) {
-                return new Thread( this.group, r, "EventLoop-" + Integer.toString( id.incrementAndGet() ) );
-            }
-        };
-    }
-
-    /**
-     * Starts the thread that will continuously update all currently connected player's
-     * connections.
-     */
-    private void startUpdateThread() {
-        this.updateThread = this.eventLoopFactory.newThread( new Runnable() {
-            @Override
-            public void run() {
-                Thread.currentThread().setName( Thread.currentThread().getName() + " [jRaknet " + Socket.this.getClass().getSimpleName() + " Update]" );
-                Socket.this.update();
-            }
-        } );
-
-        this.updateThread.start();
-    }
-
-    private void update() {
-        long start;
-
-        while ( this.running.get() ) {
-            start = System.currentTimeMillis();
-
-            // Update all connections:
-            this.updateConnections( start );
-
-            long time = System.currentTimeMillis() - start;
-            if ( time < 10 ) {
-                try {
-                    Thread.sleep( 10 - time );
-                } catch ( InterruptedException e ) {
-                    e.printStackTrace();
-                }
-            }
-        }
-
-        this.cleanupUpdateThread();
+        EventLoops.FLUSHER.queued.add( item );
+        EventLoops.FLUSHER.start();
     }
 
 }

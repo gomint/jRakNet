@@ -6,20 +6,18 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.epoll.Epoll;
 import io.netty.channel.epoll.EpollDatagramChannel;
-import io.netty.channel.epoll.EpollEventLoopGroup;
-import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.DatagramPacket;
 import io.netty.channel.socket.nio.NioDatagramChannel;
 import io.netty.util.internal.ThreadLocalRandom;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
 
-import static io.gomint.jraknet.RakNetConstraints.*;
+import static io.gomint.jraknet.RakNetConstraints.UNCONNECTED_PING;
+import static io.gomint.jraknet.RakNetConstraints.UNCONNECTED_PONG;
 
 /**
  * @author BlackyPaw
@@ -76,7 +74,7 @@ public class ClientSocket extends Socket {
         }
 
         this.udpSocket = new Bootstrap();
-        this.udpSocket.group( Epoll.isAvailable() ? new EpollEventLoopGroup() : new NioEventLoopGroup() );
+        this.udpSocket.group( EventLoops.LOOP_GROUP );
         this.udpSocket.channel( Epoll.isAvailable() ? EpollDatagramChannel.class : NioDatagramChannel.class );
         this.udpSocket.handler( new ChannelInboundHandlerAdapter() {
             @Override
@@ -85,10 +83,14 @@ public class ClientSocket extends Socket {
                 PacketBuffer content = new PacketBuffer( packet.content() );
                 InetSocketAddress sender = packet.sender();
 
+                getImplementationLogger().trace( "IN> {}", content );
+
                 if ( !receiveDatagram( sender, content ) ) {
                     // Push datagram to update queue:
                     handleDatagram( sender, content, System.currentTimeMillis() );
                 }
+
+                content.release();
             }
         } );
 
@@ -99,8 +101,6 @@ public class ClientSocket extends Socket {
             exception.initCause( e );
             throw exception;
         }
-
-        this.afterInitialize();
     }
 
     /**
@@ -169,7 +169,7 @@ public class ClientSocket extends Socket {
         }
 
         // Connection will start to send pre-connection requests automatically:
-        this.connection = new ClientConnection( this, address, ConnectionState.INITIALIZING );
+        this.connection = new ClientConnection( this, address );
     }
 
     /**
@@ -204,8 +204,8 @@ public class ClientSocket extends Socket {
     @Override
     protected boolean receiveDatagram( InetSocketAddress sender, PacketBuffer datagram ) {
         // Check if this might be an unconnected pong:
-        byte packetId = datagram.getBuffer()[0];
-        if ( packetId == UNCONNECTED_PONG || packetId == UNCONNECTED_PONG_MOJANG ) {
+        byte packetId = datagram.getBuffer().getByte(0);
+        if ( packetId == UNCONNECTED_PONG ) {
             this.handleUnconnectedPong( sender, datagram );
             return true;
         }
@@ -227,39 +227,6 @@ public class ClientSocket extends Socket {
         }
     }
 
-    /**
-     * Updates all connections this socket created.
-     *
-     * @param time The current system time
-     */
-    @Override
-    protected void updateConnections( long time ) {
-        if ( this.connection != null ) {
-            if ( this.connection.getLastReceivedPacketTime() + CONNECTION_TIMEOUT_MILLIS < time ) {
-                this.connection.notifyTimeout();
-                this.connection = null;
-            } else {
-                if ( !this.connection.update( time ) ) {
-                    this.connection = null;
-                }
-            }
-        }
-    }
-
-    /**
-     * Invoked after the update thread was stopped but right before it terminates. May perform any necessary
-     * cleanup.
-     */
-    @Override
-    protected void cleanupUpdateThread() {
-        // long time = System.currentTimeMillis();
-        if ( this.connection != null ) {
-            this.connection.disconnect( "Socket is closing" );
-            // this.connection.update( time );
-        }
-        this.connection = null;
-    }
-
     // ================================ INTERNALS ================================ //
 
     /**
@@ -268,24 +235,12 @@ public class ClientSocket extends Socket {
      *
      * @param recipient The recipient of the data
      * @param buffer    The buffer to transmit
-     * @throws IOException Thrown if the transmission fails
      */
-    void send( InetSocketAddress recipient, PacketBuffer buffer ) throws IOException {
-        this.send( recipient, buffer.getBuffer(), buffer.getBufferOffset(), buffer.getPosition() - buffer.getBufferOffset() );
-    }
-
-    /**
-     * Sends the given data to the specified recipient immediately, i.e. without caching nor any form of
-     * transmission control (reliability, resending, etc.)
-     *
-     * @param recipient The recipient of the data
-     * @param buffer    The buffer holding the data to send
-     * @param offset    The offset into the buffer
-     * @param length    The length of the data chunk to send
-     * @throws IOException Thrown if the transmission fails
-     */
-    void send( InetSocketAddress recipient, byte[] buffer, int offset, int length ) throws IOException {
-        this.channel.writeAndFlush( new DatagramPacket( Unpooled.wrappedBuffer( buffer, offset, length ), recipient ) );
+    void send( InetSocketAddress recipient, PacketBuffer buffer ) {
+        if ( this.channel != null ) {
+            this.flush( new Flusher.FlushItem( this.channel, new DatagramPacket( buffer.getBuffer().retain(), recipient ) ) );
+            buffer.release();
+        }
     }
 
     /**
@@ -336,12 +291,10 @@ public class ClientSocket extends Socket {
         PacketBuffer buffer = new PacketBuffer( 9 );
         buffer.writeByte( UNCONNECTED_PING );
         buffer.writeLong( System.currentTimeMillis() );
+        buffer.writeBytes( RakNetConstraints.OFFLINE_MESSAGE_DATA_ID );
+        buffer.writeLong( this.getGuid() );
 
-        try {
-            this.send( recipient, buffer );
-        } catch ( IOException e ) {
-            this.logger.error( "Failed to send ping to recipient", e );
-        }
+        this.send( recipient, buffer );
     }
 
     /**
@@ -371,6 +324,10 @@ public class ClientSocket extends Socket {
                 serverGuid,
                 motd );
         this.propagateEvent( new SocketEvent( SocketEvent.Type.UNCONNECTED_PONG, info ) );
+    }
+
+    public void removeConnection() {
+        this.connection = null;
     }
 
 }

@@ -1,22 +1,45 @@
 package io.gomint.jraknet;
 
-import io.gomint.jraknet.datastructures.*;
+import io.gomint.jraknet.datastructures.BinaryOrderingHeap;
+import io.gomint.jraknet.datastructures.BitQueue;
+import io.gomint.jraknet.datastructures.DatagramContentNode;
+import io.gomint.jraknet.datastructures.FixedSizeRRBuffer;
+import io.gomint.jraknet.datastructures.OrderingHeap;
+import io.gomint.jraknet.datastructures.TriadRange;
 import io.netty.buffer.ByteBuf;
-import io.netty.channel.Channel;
+import io.netty.buffer.PooledByteBufAllocator;
 import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Queue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Function;
 
-import static io.gomint.jraknet.RakNetConstraints.*;
+import static io.gomint.jraknet.RakNetConstraints.CONNECTED_PING;
+import static io.gomint.jraknet.RakNetConstraints.CONNECTED_PONG;
+import static io.gomint.jraknet.RakNetConstraints.DATA_HEADER_BYTE_LENGTH;
+import static io.gomint.jraknet.RakNetConstraints.DETECT_LOST_CONNECTION;
+import static io.gomint.jraknet.RakNetConstraints.DISCONNECTION_NOTIFICATION;
+import static io.gomint.jraknet.RakNetConstraints.MAX_MESSAGE_HEADER_BYTE_LENGTH;
+import static io.gomint.jraknet.RakNetConstraints.NUM_ORDERING_CHANNELS;
+import static io.gomint.jraknet.RakNetConstraints.USER_PACKET_ENUM;
 
 /**
  * @author BlackyPaw
@@ -25,10 +48,24 @@ import static io.gomint.jraknet.RakNetConstraints.*;
  */
 public abstract class Connection {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger( Connection.class );
-    public static final int DEFAULT_RESEND_TIMEOUT = 500;
-    protected static final InetSocketAddress[] LOCAL_IP_ADDRESSES = new InetSocketAddress[]{ new InetSocketAddress( "127.0.0.1", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ), new InetSocketAddress( "0.0.0.0", 0 ) };
-    protected static final InetSocketAddress[] LOCAL_IP_ADDRESSES_V6 = new InetSocketAddress[]{ new InetSocketAddress( "::1", 0 ), new InetSocketAddress( "::0", 0 ), new InetSocketAddress( "::0", 0 ), new InetSocketAddress( "::0", 0 ), new InetSocketAddress( "::0", 0 ), new InetSocketAddress( "::0", 0 ), new InetSocketAddress( "::0", 0 ), new InetSocketAddress( "::0", 0 ), new InetSocketAddress( "::0", 0 ), new InetSocketAddress( "::0", 0 ) };
+    private static final String ALL_IPV4 = "0.0.0.0";
+    private static final String ALL_IPV6 = "::0";
+
+    protected static final InetSocketAddress[] LOCAL_IP_ADDRESSES = new InetSocketAddress[]{
+            new InetSocketAddress( "127.0.0.1", 0 ), new InetSocketAddress( ALL_IPV4, 0 ),
+            new InetSocketAddress( ALL_IPV4, 0 ), new InetSocketAddress( ALL_IPV4, 0 ),
+            new InetSocketAddress( ALL_IPV4, 0 ), new InetSocketAddress( ALL_IPV4, 0 ),
+            new InetSocketAddress( ALL_IPV4, 0 ), new InetSocketAddress( ALL_IPV4, 0 ),
+            new InetSocketAddress( ALL_IPV4, 0 ), new InetSocketAddress( ALL_IPV4, 0 )
+    };
+
+    protected static final InetSocketAddress[] LOCAL_IP_ADDRESSES_V6 = new InetSocketAddress[]{
+            new InetSocketAddress( "::1", 0 ), new InetSocketAddress( ALL_IPV6, 0 ),
+            new InetSocketAddress( ALL_IPV6, 0 ), new InetSocketAddress( ALL_IPV6, 0 ),
+            new InetSocketAddress( ALL_IPV6, 0 ), new InetSocketAddress( ALL_IPV6, 0 ),
+            new InetSocketAddress( ALL_IPV6, 0 ), new InetSocketAddress( ALL_IPV6, 0 ),
+            new InetSocketAddress( ALL_IPV6, 0 ), new InetSocketAddress( ALL_IPV6, 0 )
+    };
 
     // Connection Metadata
     private final InetSocketAddress address;
@@ -39,12 +76,23 @@ public abstract class Connection {
     private long guid;
 
     private long lastReceivedPacket;
+    private long connectingStart;
 
     // Congestion Management
     private int expectedReliableMessageNumber;
     private BitQueue reliableMessageQueue;
     private AtomicInteger nextDatagramSequenceNumber = new AtomicInteger( 0 );
     private int expectedDatagramSequenceNumber;
+
+    // Packet loss tracking
+    private int packetsACKed;
+    private int packetsNAKed;
+    private long nextPacketLossCheck;
+
+    // RTT tracking
+    private ReentrantLock rttLock = new ReentrantLock( true );
+    private List<Integer> latestRTT = new ArrayList<>( 33 ); // Raknet uses 33 "pings" to check RTT
+    private int rtt;
 
     // Ordering Channels
     private int[] orderedReadIndex;
@@ -61,7 +109,7 @@ public abstract class Connection {
     private BlockingQueue<EncapsulatedPacket> receiveBuffer;
 
     // Sending
-    private BlockingQueue<EncapsulatedPacket> sendBuffer;
+    private Queue<EncapsulatedPacket> sendBuffer;
     private AtomicInteger nextReliableMessageNumber = new AtomicInteger( 0 );
     private int nextSplitPacketID;
     private List<TriadRange> outgoingACKs;
@@ -71,7 +119,7 @@ public abstract class Connection {
 
     // Resending
     private FixedSizeRRBuffer<EncapsulatedPacket> resendBuffer;
-    private BlockingQueue<EncapsulatedPacket> resendQueue;
+    private Queue<EncapsulatedPacket> resendQueue;
     private FixedSizeRRBuffer<DatagramContentNode> datagramContentBuffer;
 
     // Disconnect
@@ -82,15 +130,47 @@ public abstract class Connection {
     protected long lastPingTime;
     protected long lastPongTime;
 
+    // Data processors
+    private List<Function<EncapsulatedPacket, EncapsulatedPacket>> dataProcessors = new CopyOnWriteArrayList<>();
+
+    // Updater thread
+    private ScheduledFuture<?> updater;
+
+    // Congestion control
+    private SlidingWindow slidingWindow;
+    private AtomicInteger unackedBytes = new AtomicInteger( 0 );
+
     // ================================ CONSTRUCTORS ================================ //
 
     Connection( InetSocketAddress address, ConnectionState initialState ) {
         this.address = address;
-        this.state = initialState;
+        this.setState( initialState );
         this.reset();
+        this.initUpdater();
     }
 
     // ================================ PUBLIC API ================================ //
+
+    /**
+     * Add a new data processor. Data Processors are called on the netty threads. This can be used to apply further
+     * custom data manipulation (like gzip compression, aes encryption etc.)
+     * <p>
+     * The function gets the previous encapsulated Packet and should return the modified version.
+     *
+     * @param dataProcessor which should be attached to this connection
+     */
+    public void addDataProcessor( Function<EncapsulatedPacket, EncapsulatedPacket> dataProcessor ) {
+        this.dataProcessors.add( dataProcessor );
+    }
+
+    /**
+     * Remove a data processor.
+     *
+     * @param dataProcessor which should be removed
+     */
+    public void removeDataProcessor( Function<EncapsulatedPacket, EncapsulatedPacket> dataProcessor ) {
+        this.dataProcessors.remove( dataProcessor );
+    }
 
     /**
      * Get the ping of the underlying connection. This is done by sending ping packets every 2 seconds. So this
@@ -127,8 +207,8 @@ public abstract class Connection {
      * @return Whether or not the connection is entirely connected
      */
     public boolean isConnecting() {
-        ConnectionState state = this.getState();
-        return !( state == ConnectionState.UNCONNECTED || state == ConnectionState.CONNECTED || state == ConnectionState.DISCONNECTING );
+        ConnectionState currentState = this.getState();
+        return !( currentState == ConnectionState.UNCONNECTED || currentState == ConnectionState.CONNECTED || currentState == ConnectionState.DISCONNECTING );
     }
 
     /**
@@ -205,7 +285,7 @@ public abstract class Connection {
      * @return One single data packet or null if no more packets are available.
      */
     public EncapsulatedPacket receive() {
-        if ( this.receiveBuffer.isEmpty() ) {
+        if ( this.receiveBuffer == null || this.receiveBuffer.isEmpty() ) {
             return null;
         }
 
@@ -223,6 +303,10 @@ public abstract class Connection {
      * @return One single data packet or null if no more packets are available.
      */
     public EncapsulatedPacket poll() {
+        if ( this.receiveBuffer == null ) {
+            return null;
+        }
+
         try {
             while ( this.isConnected() || !this.receiveBuffer.isEmpty() ) {
                 EncapsulatedPacket packet = this.receiveBuffer.poll( 50, TimeUnit.MILLISECONDS );
@@ -238,21 +322,12 @@ public abstract class Connection {
     }
 
     /**
-     * Sends the specified data ensuring the packet reliability {@link PacketReliability#RELIABLE}.
-     *
-     * @param data The data to send
-     */
-    public void send( byte[] data ) {
-        this.send( PacketReliability.RELIABLE, 0, data );
-    }
-
-    /**
      * Sends the specified data ensuring the given packet reliability.
      *
      * @param reliability The reliability to ensure
      * @param data        The data to send
      */
-    public void send( PacketReliability reliability, byte[] data ) {
+    public void send( PacketReliability reliability, PacketBuffer data ) {
         this.send( reliability, 0, data );
     }
 
@@ -264,34 +339,16 @@ public abstract class Connection {
      * @param orderingChannel The ordering channel to send the data on
      * @param data            The data to send
      */
-    public void send( PacketReliability reliability, int orderingChannel, byte[] data ) {
-        this.send( reliability, orderingChannel, data, 0, data.length );
-    }
-
-    /**
-     * Sends the specified data ensuring the given packet reliability on the specified ordering channel
-     * (must be smaller than {@link RakNetConstraints#NUM_ORDERING_CHANNELS}. In case the data is interleaved
-     * a copy must be made internally so use this method with care!
-     *
-     * @param reliability     The reliability to ensure
-     * @param orderingChannel The ordering channel to send the data on
-     * @param data            The data to send
-     * @param offset          The offset into the data array
-     * @param length          The length of the data chunk to send
-     */
-    public void send( PacketReliability reliability, int orderingChannel, byte[] data, int offset, int length ) {
+    public void send( PacketReliability reliability, int orderingChannel, PacketBuffer data ) {
         if ( !this.state.isReliable() || reliability == null || orderingChannel < 0 || orderingChannel >= NUM_ORDERING_CHANNELS || data == null || this.state == ConnectionState.DISCONNECTING ) {
+            this.getImplementationLogger().trace( "Skipping sending data: {} - {} - {} - {}", this.state, reliability, orderingChannel, data );
             return;
         }
 
-        EncapsulatedPacket packet = new EncapsulatedPacket();
+        data.setReadPosition(0);
 
-        // Got to copy packet data if it is not aligned correctly:
-        if ( offset != 0 || length != data.length ) {
-            packet.setPacketData( Arrays.copyOfRange( data, offset, offset + length ) );
-        } else {
-            packet.setPacketData( data );
-        }
+        EncapsulatedPacket packet = new EncapsulatedPacket();
+        packet.setPacketData(data.getBuffer());
 
         // Test if this packet must be split up:
         int maxSize = this.mtuSize - DATA_HEADER_BYTE_LENGTH - MAX_MESSAGE_HEADER_BYTE_LENGTH;
@@ -306,6 +363,8 @@ public abstract class Connection {
                     break;
                 case UNRELIABLE_WITH_ACK_RECEIPT:
                     reliability = PacketReliability.UNRELIABLE_WITH_ACK_RECEIPT;
+                    break;
+                default: // No action needed for all others
                     break;
             }
         }
@@ -326,60 +385,13 @@ public abstract class Connection {
         if ( packet.getPacketLength() > maxSize ) {
             // Split up this packet:
             this.splitPacket( packet );
+            packet.release(); // Split packets don't need their parent anymore, they retain sliced views themselves
         } else {
+            this.getImplementationLogger().trace( "Adding new packet to send queue" );
+
             // Add it to the send buffer immediately:
             this.sendBuffer.offer( packet );
         }
-    }
-
-    /**
-     * Sends the specified data ensuring the packet reliability {@link PacketReliability#RELIABLE}. Makes a copy
-     * of the specified data internally before caching it for send.
-     *
-     * @param data The data to send
-     */
-    public void sendCopy( byte[] data ) {
-        this.send( Arrays.copyOf( data, data.length ) );
-    }
-
-    /**
-     * Sends the specified data ensuring the given packet reliability. Makes a copy
-     * of the specified data internally before caching it for send.
-     *
-     * @param reliability The reliability to ensure
-     * @param data        The data to send
-     */
-    public void sendCopy( PacketReliability reliability, byte[] data ) {
-        this.send( reliability, Arrays.copyOf( data, data.length ) );
-    }
-
-    /**
-     * Sends the specified data ensuring the given packet reliability on the specified ordering channel
-     * (must be smaller than {@link RakNetConstraints#NUM_ORDERING_CHANNELS}. Makes a copy of the specified
-     * data internally before caching it for send.
-     *
-     * @param reliability     The reliability to ensure
-     * @param orderingChannel The ordering channel to send the data on
-     * @param data            The data to send
-     */
-    public void sendCopy( PacketReliability reliability, int orderingChannel, byte[] data ) {
-        this.send( reliability, orderingChannel, Arrays.copyOf( data, data.length ) );
-    }
-
-    /**
-     * Sends the specified data ensuring the given packet reliability on the specified ordering channel
-     * (must be smaller than {@link RakNetConstraints#NUM_ORDERING_CHANNELS}. In case the data is interleaved
-     * a copy must be made internally so use this method with care! Makes a copy of the specified data internally
-     * before caching it for send.
-     *
-     * @param reliability     The reliability to ensure
-     * @param orderingChannel The ordering channel to send the data on
-     * @param data            The data to send
-     * @param offset          The offset into the data array
-     * @param length          The length of the data chunk to send
-     */
-    public void sendCopy( PacketReliability reliability, int orderingChannel, byte[] data, int offset, int length ) {
-        this.send( reliability, orderingChannel, Arrays.copyOfRange( data, offset, offset + length ) );
     }
 
     // ================================ IMPLEMENTATION HOOKS ================================ //
@@ -407,8 +419,16 @@ public abstract class Connection {
      * @param time The current system time
      */
     protected void preUpdate( long time ) {
+        // Ping when connected
         if ( this.isConnected() && this.currentPingTime + 2000L < time ) {
             this.sendConnectedPing( time );
+        }
+
+        // Check for state change
+        if ( this.isConnecting() && this.connectingStart + 30000L < time ) {
+            this.getImplementationLogger().warn( "Connection with {} has been reset: Connect timeout (30s)", this.address );
+            this.reset();
+            this.setState(ConnectionState.UNCONNECTED);
         }
     }
 
@@ -420,7 +440,26 @@ public abstract class Connection {
      * @param time The current system time
      */
     protected void postUpdate( long time ) {
+        if ( time > this.nextPacketLossCheck ) {
+            this.packetsNAKed = 0;
+            this.packetsACKed = 0;
+            this.nextPacketLossCheck = time + 1000;
+        }
 
+        this.rttLock.lock();
+        try {
+            if ( this.latestRTT.size() == 33 ) {
+                int sum = 0;
+
+                for ( Integer currentRTT : this.latestRTT ) {
+                    sum += currentRTT;
+                }
+
+                this.rtt = sum / 33;
+            }
+        } finally {
+            this.rttLock.unlock();
+        }
     }
 
     /**
@@ -483,12 +522,18 @@ public abstract class Connection {
             case CONNECTED:
                 this.propagateFullyConnected();
                 break;
+            case INITIALIZING:
+                this.connectingStart = System.currentTimeMillis();
+                break;
+            default: // No action needed for all others
+                break;
         }
     }
 
 
     protected final void setMtuSize( int mtuSize ) {
-        this.mtuSize = Math.min( mtuSize, 1464 );
+        this.mtuSize = Math.min( mtuSize, RakNetConstraints.MAXIMUM_MTU_SIZE );
+        this.slidingWindow = new SlidingWindow( mtuSize );
     }
 
     protected final void setGuid( long guid ) {
@@ -514,10 +559,10 @@ public abstract class Connection {
         this.receiveBuffer = new LinkedBlockingQueue<>();
         this.outgoingACKs = new ArrayList<>( 128 );
         this.outgoingNAKs = new ArrayList<>( 128 );
-        this.sendBuffer = new LinkedBlockingQueue<>();
-        this.resendBuffer = new FixedSizeRRBuffer<>( 256 );
-        this.resendQueue = new LinkedBlockingQueue<>();
-        this.datagramContentBuffer = new FixedSizeRRBuffer<>( 256 );
+        this.sendBuffer = new ConcurrentLinkedQueue<>();
+        this.resendBuffer = new FixedSizeRRBuffer<>( 512 );
+        this.resendQueue = new ConcurrentLinkedQueue<>();
+        this.datagramContentBuffer = new FixedSizeRRBuffer<>( 512 );
     }
 
     /**
@@ -551,46 +596,52 @@ public abstract class Connection {
         this.datagramContentBuffer = null;
     }
 
-    private int pushPacket( List<EncapsulatedPacket> sendList, EncapsulatedPacket packet, int currentDatagramSize ) {
+    private void writePacketsAndSend( List<EncapsulatedPacket> sendList, long time ) {
+        // Flush out datagram:
+        PacketBuffer buffer = new PacketBuffer( this.mtuSize );
+
+        // Write datagram header:
+        byte flags = (byte) ( 0x80 | ( !sendList.isEmpty() ? 0x8 : 0x0 ) );     // IsValid | (isContinuousSend)
+        buffer.writeByte( flags );
+
+        int nextDiaNumber = this.nextDatagramSequenceNumber.getAndIncrement();
+        buffer.writeTriad( nextDiaNumber );
+
+        DatagramContentNode dcn = null;
+        for ( EncapsulatedPacket encapsulatedPacket : sendList ) {
+            this.getImplementationLogger().trace( "Adding {} to packet {}", nextDiaNumber, encapsulatedPacket.getReliableMessageNumber() );
+
+            // Add this packet to the datagram content buffer if reliable:
+            if ( encapsulatedPacket.getReliability() != PacketReliability.UNRELIABLE && encapsulatedPacket.getReliability() != PacketReliability.UNRELIABLE_SEQUENCED ) {
+                if ( dcn == null ) {
+                    dcn = new DatagramContentNode( encapsulatedPacket.getReliableMessageNumber() );
+                    this.datagramContentBuffer.set( nextDiaNumber, dcn );
+                } else {
+                    dcn.setNext( new DatagramContentNode( encapsulatedPacket.getReliableMessageNumber() ) );
+                    dcn = dcn.getNext();
+                }
+            }
+
+            encapsulatedPacket.writeToBuffer( buffer, time );
+        }
+
+        sendList.clear();
+
+        // Finally send this packet buffer to its destination:
+        try {
+            this.sendRaw( this.address, buffer );
+        } catch ( IOException e ) {
+            this.getImplementationLogger().error( "Failed to send datagram to destination", e );
+        }
+    }
+
+    private int pushPacket( List<EncapsulatedPacket> sendList, EncapsulatedPacket packet, int currentDatagramSize, long time ) {
         int maxDatagramSize = this.mtuSize - DATA_HEADER_BYTE_LENGTH;
 
         // Push current datagram to send queue if adding this packet would exceed the MTU:
         int length = packet.getHeaderLength() + packet.getPacketLength();
         if ( currentDatagramSize + length > maxDatagramSize ) {
-            // Flush out datagram:
-            PacketBuffer buffer = new PacketBuffer( this.mtuSize );
-
-            // Write datagram header:
-            byte flags = (byte) ( 0x80 | ( sendList.size() > 0 ? 0x8 : 0x0 ) );     // IsValid | (isContinuousSend)
-            buffer.writeByte( flags );
-
-            int nextDiaNumber = this.nextDatagramSequenceNumber.getAndIncrement();
-            buffer.writeTriad( nextDiaNumber );
-
-            DatagramContentNode dcn = null;
-            for ( EncapsulatedPacket encapsulatedPacket : sendList ) {
-                // Add this packet to the datagram content buffer if reliable:
-                if ( encapsulatedPacket.getReliability() != PacketReliability.UNRELIABLE && encapsulatedPacket.getReliability() != PacketReliability.UNRELIABLE_SEQUENCED ) {
-                    if ( dcn == null ) {
-                        dcn = new DatagramContentNode( encapsulatedPacket.getReliableMessageNumber() );
-                        this.datagramContentBuffer.set( nextDiaNumber, dcn );
-                    } else {
-                        dcn.setNext( new DatagramContentNode( encapsulatedPacket.getReliableMessageNumber() ) );
-                        dcn = dcn.getNext();
-                    }
-                }
-
-                encapsulatedPacket.writeToBuffer( buffer );
-            }
-            sendList.clear();
-
-            // Finally send this packet buffer to its destination:
-            try {
-                this.sendRaw( this.address, buffer );
-            } catch ( IOException e ) {
-                this.getImplementationLogger().error( "Failed to send datagram to destination", e );
-            }
-
+            this.writePacketsAndSend( sendList, time );
             currentDatagramSize = 0;
         }
 
@@ -605,34 +656,55 @@ public abstract class Connection {
         int currentDatagramSize = 0;
 
         // Resend everything scheduled for resend:
-        while ( !this.resendQueue.isEmpty() ) {
-            EncapsulatedPacket packet = this.resendQueue.peek();
-            if ( packet.getNextExecution() <= time ) {
-                // Delete packets marked for removal:
+        if ( !this.resendQueue.isEmpty() ) {
+            int maxResendBytes = this.slidingWindow.getReTransmissionBandwidth( this.unackedBytes.get() );
+            int currentResendBytes = 0;
+            boolean onResendCalled = false;
+
+            Iterator<EncapsulatedPacket> resendIterator = this.resendQueue.iterator();
+            while ( resendIterator.hasNext() ) {
+                EncapsulatedPacket packet = resendIterator.next();
                 if ( packet.getNextExecution() == 0L ) {
-                    this.resendQueue.poll();
-                    continue;
+                    resendIterator.remove();
+                    packet.release();
+                } else if ( packet.getNextExecution() <= time ) {
+                    currentResendBytes += packet.getHeaderLength() + packet.getPacketLength();
+                    if ( currentResendBytes <= maxResendBytes ) {
+                        currentDatagramSize = this.pushPacket( sendList, packet, currentDatagramSize, time );
+
+                        if ( !onResendCalled ) {
+                            this.slidingWindow.onResend();
+                            onResendCalled = true;
+                        }
+
+                        packet.setNextExecution( time + this.slidingWindow.getRTOForRetransmission() );
+
+                        this.getImplementationLogger().trace( "Resending packet due to client not acking it: {}", packet.getReliableMessageNumber() );
+                        this.packetsNAKed++; // We tread this as NAK
+                    }
                 }
-
-                currentDatagramSize = this.pushPacket( sendList, packet, currentDatagramSize );
-
-                this.resendQueue.poll();
-                packet.setNextExecution( time + DEFAULT_RESEND_TIMEOUT );
-                packet.incrementSendCount();
-
-                // Insert back into resend queue:
-                this.resendQueue.add( packet );
-            } else {
-                break;
             }
         }
 
         // Attempt to send new packets:
+        int maxTransmission = this.slidingWindow.getTransmissionBandwidth( this.unackedBytes.get() );
+        int currentSendBytes = 0;
+
         while ( !this.sendBuffer.isEmpty() && this.resendBuffer.get( this.nextReliableMessageNumber.get() ) == null ) {
-            EncapsulatedPacket packet = this.sendBuffer.poll();
+            EncapsulatedPacket packet = this.sendBuffer.peek();
             if ( packet == null ) {
                 continue;
             }
+
+            // Check for max transmission limit
+            currentSendBytes += packet.getHeaderLength() + packet.getPacketLength();
+            if ( currentSendBytes > maxTransmission ) {
+                this.getImplementationLogger().trace( "Stopped sending new data due to limit {} > {}", currentSendBytes, maxTransmission );
+                break;
+            }
+
+            // We consume this now since we send it
+            this.sendBuffer.remove();
 
             // Add message numbers
             PacketReliability reliability = packet.getReliability();
@@ -641,52 +713,22 @@ public abstract class Connection {
                     reliability == PacketReliability.RELIABLE_ORDERED ) {
                 packet.setReliableMessageNumber( this.nextReliableMessageNumber.getAndIncrement() );
 
+                this.unackedBytes.addAndGet( packet.getHeaderLength() + packet.getPacketLength() );
+
                 // Insert into resend queue:
-                packet.setNextExecution( time + DEFAULT_RESEND_TIMEOUT );
+                packet.setNextExecution( time + this.slidingWindow.getRTOForRetransmission() ); // When we did not hear from the packet in 10 seconds we have a problem
                 this.resendQueue.add( packet );
 
                 // Add to FixedSize round-robin resend buffer:
                 this.resendBuffer.set( packet.getReliableMessageNumber(), packet );
             }
 
-            currentDatagramSize = this.pushPacket( sendList, packet, currentDatagramSize );
+            currentDatagramSize = this.pushPacket( sendList, packet, currentDatagramSize, time );
         }
 
         // Push the final datagram if any is to be pushed:
         if ( currentDatagramSize > 0 ) {
-            // Flush out datagram:
-            PacketBuffer buffer = new PacketBuffer( this.mtuSize );
-
-            // Write datagram header:
-            byte flags = (byte) ( 0x80 | ( sendList.size() > 0 ? 0x8 : 0x0 ) );     // IsValid | (isContinuousSend)
-            buffer.writeByte( flags );
-
-            int nextDiaNumber = this.nextDatagramSequenceNumber.getAndIncrement();
-            buffer.writeTriad( nextDiaNumber );
-
-            DatagramContentNode dcn = null;
-            for ( EncapsulatedPacket encapsulatedPacket : sendList ) {
-                // Add this packet to the datagram content buffer if reliable:
-                if ( encapsulatedPacket.getReliability() != PacketReliability.UNRELIABLE && encapsulatedPacket.getReliability() != PacketReliability.UNRELIABLE_SEQUENCED ) {
-                    if ( dcn == null ) {
-                        dcn = new DatagramContentNode( encapsulatedPacket.getReliableMessageNumber() );
-                        this.datagramContentBuffer.set( nextDiaNumber, dcn );
-                    } else {
-                        dcn.setNext( new DatagramContentNode( encapsulatedPacket.getReliableMessageNumber() ) );
-                        dcn = dcn.getNext();
-                    }
-                }
-
-                encapsulatedPacket.writeToBuffer( buffer );
-            }
-            sendList.clear();
-
-            // Finally send this packet buffer to its destination:
-            try {
-                this.sendRaw( this.address, buffer );
-            } catch ( IOException e ) {
-                this.getImplementationLogger().error( "Failed to send datagram to destination", e );
-            }
+            this.writePacketsAndSend( sendList, time );
         }
     }
 
@@ -704,8 +746,11 @@ public abstract class Connection {
         }
 
         if ( !this.state.isReliable() ) {
+            this.getImplementationLogger().trace( "Not updating, not in reliable state" );
             return true;
         }
+
+        this.getImplementationLogger().trace("Last packet gotten: {} ms", time - this.lastReceivedPacket);
 
         this.sendACKs();
         this.sendNAKs();
@@ -714,13 +759,16 @@ public abstract class Connection {
 
         this.postUpdate( time );
 
-        if ( this.state == ConnectionState.DISCONNECTING ) {
-            if ( this.sendBuffer.size() == 0 ) {
-                // Check if we can perform a clean disconnect now:
-                this.state = ConnectionState.UNCONNECTED;
-                this.propagateConnectionDisconnected();
-                return false;
-            }
+        // Reset sliding window if there is one
+        if ( this.slidingWindow != null ) {
+            this.slidingWindow.onTickFinish();
+        }
+
+        if ( this.state == ConnectionState.DISCONNECTING && this.sendBuffer.isEmpty() ) {
+            // Check if we can perform a clean disconnect now:
+            this.state = ConnectionState.UNCONNECTED;
+            this.propagateConnectionDisconnected();
+            return false;
         }
 
         return true;
@@ -765,7 +813,7 @@ public abstract class Connection {
         this.lastReceivedPacket = time;
 
         if ( !this.handleDatagram0( sender, datagram, time ) ) {
-            this.handleConnectedDatagram( sender, datagram );
+            this.handleConnectedDatagram( sender, datagram, time );
         }
     }
 
@@ -786,7 +834,9 @@ public abstract class Connection {
         }
 
         final int length = packet.getPacketLength();
-        int cursor = 0, count;
+        int cursor = 0;
+        int count;
+
         for ( int splitPacketIndex = 0; splitPacketIndex < splitPacketCount; ++splitPacketIndex ) {
             count = length - cursor;
             if ( count > bytesPerDatagram ) {
@@ -794,7 +844,7 @@ public abstract class Connection {
             }
 
             EncapsulatedPacket copy = new EncapsulatedPacket( packet );
-            copy.setPacketData( Arrays.copyOfRange( packet.getPacketData(), cursor, cursor + count ) );
+            copy.setPacketData( packet.getPacketData().slice( cursor, count ) );
             copy.setSplitPacketId( splitPacketID );
             copy.setSplitPacketIndex( splitPacketIndex );
             copy.setSplitPacketCount( splitPacketCount );
@@ -806,25 +856,55 @@ public abstract class Connection {
 
     // ================================ ACKs AND NAKs ================================ //
 
-    private void handleACKs( PacketBuffer buffer ) {
+    private void handleACKs( PacketBuffer buffer, long time ) {
         TriadRange[] ranges = buffer.readTriadRangeList();
         if ( ranges == null ) {
             return;
         }
 
-        for ( int i = 0; i < ranges.length; ++i ) {
-            for ( int j = ranges[i].getMin(); j <= ranges[i].getMax(); ++j ) {
+        for ( TriadRange range : ranges ) {
+            for ( int j = range.getMin(); j <= range.getMax(); ++j ) {
                 // Remove all packets contained in the ACKed datagram from the resend buffer:
                 DatagramContentNode node = this.datagramContentBuffer.get( j );
+                this.getImplementationLogger().trace( "Got datagram number to ack: {}", j );
                 while ( node != null ) {
-                    EncapsulatedPacket packet = this.resendBuffer.get( node.getReliableMessageNumber() );
-                    if ( packet != null ) {
-                        // Enforce deletion on next interaction:
-                        packet.setNextExecution( 0L );
-                        this.resendBuffer.set( node.getReliableMessageNumber(), null );
-                    }
+                    this.consumeACKNode( node, time );
                     node = node.getNext();
                 }
+            }
+        }
+    }
+
+    private void consumeACKNode( DatagramContentNode node, long time ) {
+        EncapsulatedPacket packet = this.resendBuffer.get( node.getReliableMessageNumber() );
+        if ( packet != null ) {
+            if ( this.slidingWindow != null ) {
+                this.slidingWindow.onACK( time - packet.getSendTime() );
+            }
+
+            // Ensure that this packet doesn't get resend anymore
+            this.resendBuffer.remove( packet.getReliableMessageNumber() );
+
+            // Track this event in stats
+            this.packetsACKed++;
+            this.unackedBytes.addAndGet( -( packet.getHeaderLength() + packet.getPacketLength() ) );
+
+            this.getImplementationLogger().trace( "Removing packet {} due to client ACK - remaining unacked bytes: {}", node.getReliableMessageNumber(), this.unackedBytes );
+
+            // Mark this for deletion by ticker thread
+            packet.setNextExecution( 0L );
+
+            // Track RTT
+            this.rttLock.lock();
+            try {
+                int currentRTT = (int) ( this.lastReceivedPacket - packet.getSendTime() );
+                if ( this.latestRTT.size() == 33 ) {
+                    this.latestRTT.remove( 0 );
+                }
+
+                this.latestRTT.add( currentRTT );
+            } finally {
+                this.rttLock.unlock();
             }
         }
     }
@@ -835,19 +915,31 @@ public abstract class Connection {
             return;
         }
 
-        for ( int i = 0; i < ranges.length; ++i ) {
-            for ( int j = ranges[i].getMin(); j <= ranges[i].getMax(); ++j ) {
+        if ( this.slidingWindow != null ) {
+            this.slidingWindow.onNAK();
+        }
+
+        for ( TriadRange range : ranges ) {
+            for ( int j = range.getMin(); j <= range.getMax(); ++j ) {
                 // Enforce immediate resend:
                 DatagramContentNode node = this.datagramContentBuffer.get( j );
                 while ( node != null ) {
-                    EncapsulatedPacket packet = this.resendBuffer.get( node.getReliableMessageNumber() );
-                    if ( packet != null ) {
-                        // Enforce instant resend on next interaction:
-                        packet.setNextExecution( 1L );
-                    }
+                    this.consumeNACKNode( node );
                     node = node.getNext();
                 }
             }
+        }
+    }
+
+    private void consumeNACKNode( DatagramContentNode node ) {
+        EncapsulatedPacket packet = this.resendBuffer.get( node.getReliableMessageNumber() );
+        if ( packet != null ) {
+            this.getImplementationLogger().trace( "Force sending NAKed Packet: {}", packet.getReliableMessageNumber() );
+
+            // Enforce instant resend on next interaction:
+            packet.setNextExecution( 1L );
+        } else {
+            this.getImplementationLogger().trace( "Wanted for resend Packet {} but its not there anymore", node.getReliableMessageNumber() );
         }
     }
 
@@ -855,7 +947,7 @@ public abstract class Connection {
         // Fast out in sending when there is nothing to do
         this.sendingACKsLock.lock();
         try {
-            if ( this.outgoingACKs.size() == 0 ) return;
+            if ( this.outgoingACKs == null || this.outgoingACKs.isEmpty() ) return;
         } finally {
             this.sendingACKsLock.unlock();
         }
@@ -869,18 +961,19 @@ public abstract class Connection {
 
         this.sendingACKsLock.lock();
         try {
-            if ( this.outgoingACKs.size() > 0 ) {
+            if ( !this.outgoingACKs.isEmpty() ) {
                 // Serialize ACKs into buffer and remove them afterwards:
                 int count = buffer.writeTriadRangeList( this.outgoingACKs, 0, this.outgoingACKs.size(), maxSize );
                 for ( int i = 0; i < count; i++ ) {
-                    this.outgoingACKs.remove( 0 );
+                    TriadRange range = this.outgoingACKs.remove( 0 );
+                    this.getImplementationLogger().trace("Wrote ACK for datagrams {} to {}", range.getMin(), range.getMax());
                 }
             }
         } finally {
             this.sendingACKsLock.unlock();
         }
 
-        if ( buffer.getPosition() > 1 ) {
+        if ( buffer.getWritePosition() > 1 ) {
             // Send this data directly:
             try {
                 this.sendRaw( this.address, buffer );
@@ -894,7 +987,7 @@ public abstract class Connection {
         // Fast out in sending when there is nothing to do
         this.sendingNAKsLock.lock();
         try {
-            if ( this.outgoingNAKs.size() == 0 ) return;
+            if ( this.outgoingNAKs == null || this.outgoingNAKs.isEmpty() ) return;
         } finally {
             this.sendingNAKsLock.unlock();
         }
@@ -908,11 +1001,12 @@ public abstract class Connection {
 
         this.sendingNAKsLock.lock();
         try {
-            if ( this.outgoingNAKs.size() > 0 ) {
+            if ( !this.outgoingNAKs.isEmpty() ) {
                 // Serialize ACKs into buffer and remove them afterwards:
                 int count = buffer.writeTriadRangeList( this.outgoingNAKs, 0, this.outgoingNAKs.size(), maxSize );
                 for ( int i = 0; i < count; i++ ) {
-                    this.outgoingNAKs.remove( 0 );
+                    TriadRange range = this.outgoingNAKs.remove( 0 );
+                    this.getImplementationLogger().trace("Wrote NAK for datagrams {} to {}", range.getMin(), range.getMax());
                 }
             }
         } finally {
@@ -920,7 +1014,7 @@ public abstract class Connection {
         }
 
         // Only send when more data than the flag has been written
-        if ( buffer.getPosition() > 1 ) {
+        if ( buffer.getWritePosition() > 1 ) {
             // Send this data directly:
             try {
                 this.sendRaw( this.address, buffer );
@@ -932,9 +1026,10 @@ public abstract class Connection {
 
     // ================================ PACKET HANDLERS ================================ //
 
-    private void handleConnectedDatagram( InetSocketAddress sender, PacketBuffer buffer ) {
+    private void handleConnectedDatagram( InetSocketAddress sender, PacketBuffer buffer, long time ) {
         if ( !this.state.isReliable() ) {
             // This connection is not reliable --> internal structures might not have been initialized
+            this.getImplementationLogger().trace( "Connection is not reliable: {}", sender );
             return;
         }
 
@@ -950,7 +1045,7 @@ public abstract class Connection {
         boolean isACK = ( flags & 0x40 ) != 0;
         if ( isACK ) {
             // This datagram only contains ACKs --> Handle separately
-            this.handleACKs( buffer );
+            this.handleACKs( buffer, time );
             return;
         }
 
@@ -969,19 +1064,22 @@ public abstract class Connection {
         }
 
         int datagramSequenceNumber = buffer.readTriad();
+        this.getImplementationLogger().trace("Got datagram with seq {}", datagramSequenceNumber);
+
         int skippedMessageCount = 0;
         if ( datagramSequenceNumber == this.expectedDatagramSequenceNumber ) {
             this.expectedDatagramSequenceNumber++;
         } else if ( datagramSequenceNumber > this.expectedDatagramSequenceNumber ) {
-            this.expectedDatagramSequenceNumber = datagramSequenceNumber + 1;
             skippedMessageCount = ( datagramSequenceNumber - this.expectedDatagramSequenceNumber );
+            this.expectedDatagramSequenceNumber = datagramSequenceNumber + 1;
         }
 
         // NAK all datagrams missing in between:
         if ( skippedMessageCount > 0 ) {
+            this.getImplementationLogger().trace( "Sending NAK for {} skipped messages", skippedMessageCount );
             this.sendingNAKsLock.lock();
             try {
-                this.outgoingNAKs.add( new TriadRange( datagramSequenceNumber - skippedMessageCount, datagramSequenceNumber ) );
+                this.outgoingNAKs.add( new TriadRange( datagramSequenceNumber - skippedMessageCount, datagramSequenceNumber - 1 ) );
             } finally {
                 this.sendingNAKsLock.unlock();
             }
@@ -990,7 +1088,7 @@ public abstract class Connection {
         // ACK this datagram:
         this.sendingACKsLock.lock();
         try {
-            if ( this.outgoingACKs.size() > 0 ) {
+            if ( !this.outgoingACKs.isEmpty() ) {
                 TriadRange lastAdded = this.outgoingACKs.get( this.outgoingACKs.size() - 1 );
                 if ( lastAdded != null ) {
                     if ( lastAdded.getMax() + 1 == datagramSequenceNumber ) {
@@ -1022,6 +1120,8 @@ public abstract class Connection {
                 int holes = ( packet.getReliableMessageNumber() - this.expectedReliableMessageNumber );
 
                 if ( holes > 0 ) {
+                    this.getImplementationLogger().trace("Missing {} reliable packet messages", holes);
+
                     if ( holes < this.reliableMessageQueue.size() ) {
                         if ( this.reliableMessageQueue.get( holes ) ) {
                             this.reliableMessageQueue.set( holes, false );
@@ -1086,12 +1186,7 @@ public abstract class Connection {
                             this.highestSequencedReadIndex[orderingChannel] = sequencingIndex + 1;
                             // Pass on to user
                             this.pushReceivedPacket( packet );
-                        } // else {
-                        // Is coming out of band
-
-                        // Simply parse next packet:
-                        // continue;
-                        // }
+                        }
                     } else {
                         // Is ordered
 
@@ -1130,11 +1225,7 @@ public abstract class Connection {
                     weight += ( packet.getReliability() == PacketReliability.RELIABLE_ORDERED ? ( 1 << 19 ) - 1 : packet.getSequencingIndex() );
 
                     heap.insert( weight, packet );
-                } // else {
-                // Has lower ordering index than expected
-
-                // --> This packet comes out of bands; discard it
-                // }
+                }
             } else {
                 // Pass on to user
                 this.pushReceivedPacket( packet );
@@ -1149,7 +1240,7 @@ public abstract class Connection {
             return;
         }
 
-        byte packetId = packet.getPacketData()[0];
+        byte packetId = packet.getPacketData().getByte(0);
         switch ( packetId ) {
             case CONNECTED_PING:
                 this.handleConnectedPing( packet );
@@ -1158,14 +1249,24 @@ public abstract class Connection {
                 this.handleConnectedPong( packet );
                 break;
             case DISCONNECTION_NOTIFICATION:
-                this.handleDisconnectionNotification( packet );
+                this.handleDisconnectionNotification();
                 break;
             default:
-                if ( !this.handlePacket0( packet ) ) {
-                    if ( packetId > USER_PACKET_ENUM ) {
-                        this.receiveBuffer.offer( packet );
+                if ( !this.handlePacket0( packet ) && packetId > USER_PACKET_ENUM ) {
+                    // Pass this around in the data processors
+                    EncapsulatedPacket inputPacket = packet;
+                    for ( Function<EncapsulatedPacket, EncapsulatedPacket> processor : this.dataProcessors ) {
+                        inputPacket = processor.apply( inputPacket );
+                        if ( inputPacket == null ) {
+                            break;
+                        }
+                    }
+
+                    if ( inputPacket != null && !this.receiveBuffer.offer( inputPacket ) ) {
+                        this.getImplementationLogger().warn( "Can't add incoming packet to processing queue" );
                     }
                 }
+
                 break;
         }
     }
@@ -1186,21 +1287,27 @@ public abstract class Connection {
     }
 
     private void handleConnectedPing( EncapsulatedPacket packet ) {
-        PacketBuffer buffer = new PacketBuffer( packet.getPacketData(), 0 );
+        PacketBuffer buffer = new PacketBuffer( packet.getPacketData() );
         buffer.skip( 1 );
         this.sendConnectedPong( buffer.readLong() );
     }
 
     private void handleConnectedPong( @SuppressWarnings( "unused" ) EncapsulatedPacket packet ) {
-        PacketBuffer buffer = new PacketBuffer( packet.getPacketData(), 1 );
+        PacketBuffer buffer = new PacketBuffer( packet.getPacketData() );
+        buffer.skip(1);
         long inPacket = buffer.readLong();
+
+        if ( buffer.getRemaining() == 8 ) {
+            buffer.readLong();
+        }
+
         if ( inPacket == this.currentPingTime ) {
             this.lastPingTime = this.currentPingTime;
             this.lastPongTime = System.currentTimeMillis();
         }
     }
 
-    private void handleDisconnectionNotification( @SuppressWarnings( "unused" ) EncapsulatedPacket packet ) {
+    private void handleDisconnectionNotification() {
         this.state = ConnectionState.UNCONNECTED;
         this.disconnectMessage = "Connection was forcibly closed by remote peer";
         this.propagateConnectionClosed();
@@ -1212,7 +1319,7 @@ public abstract class Connection {
         PacketBuffer buffer = new PacketBuffer( 9 );
         buffer.writeByte( CONNECTED_PING );
         buffer.writeLong( time );
-        this.send( PacketReliability.UNRELIABLE, 0, buffer.getBuffer() );
+        this.send( PacketReliability.RELIABLE, 0, buffer );
         this.currentPingTime = time;
     }
 
@@ -1220,13 +1327,38 @@ public abstract class Connection {
         PacketBuffer buffer = new PacketBuffer( 9 );
         buffer.writeByte( CONNECTED_PONG );
         buffer.writeLong( pingTime );
-        this.send( PacketReliability.UNRELIABLE, buffer.getBuffer() );
+        buffer.writeLong( System.currentTimeMillis() );
+        this.send( PacketReliability.RELIABLE, buffer );
     }
 
     private void sendDisconnectionNotification() {
-        byte[] data = new byte[1];
-        data[0] = DISCONNECTION_NOTIFICATION;
+        PacketBuffer data = new PacketBuffer(1);
+        data.writeByte(DISCONNECTION_NOTIFICATION);
         this.send( PacketReliability.RELIABLE_ORDERED, 0, data );
+    }
+
+    void sendDetectLostConnection() {
+        PacketBuffer data = new PacketBuffer(1);
+        data.writeByte(DETECT_LOST_CONNECTION);
+        this.send( PacketReliability.RELIABLE, 0, data );
+    }
+
+    void initUpdater() {
+        // Attach to the current event loop
+        this.updater = EventLoops.TICKER.scheduleWithFixedDelay( () -> {
+            try {
+                if ( !update( System.currentTimeMillis() ) ) {
+                    getImplementationLogger().trace( "Removing connection" );
+                    notifyRemoval();
+                }
+            } catch ( Exception e ) {
+                this.getImplementationLogger().error( "Fatal error in connection ticking", e );
+            }
+        }, 0, 10, TimeUnit.MILLISECONDS );
+    }
+
+    void notifyRemoval() {
+        this.updater.cancel( true );
     }
 
 }

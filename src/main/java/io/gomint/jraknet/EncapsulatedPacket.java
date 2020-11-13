@@ -1,9 +1,8 @@
 package io.gomint.jraknet;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import static io.gomint.jraknet.RakNetConstraints.NUM_ORDERING_CHANNELS;
+
+import io.netty.buffer.ByteBuf;
 
 /**
  * Internal class used for buffering encapsulated packet data. Usually not returned to end users.
@@ -15,8 +14,6 @@ import static io.gomint.jraknet.RakNetConstraints.NUM_ORDERING_CHANNELS;
 // @Deprecated
 public class EncapsulatedPacket {
 
-    private static final Logger logger = LoggerFactory.getLogger( EncapsulatedPacket.class );
-
     private PacketReliability reliability = null;
     private int reliableMessageNumber = -1;
     private int sequencingIndex = -1;
@@ -25,11 +22,11 @@ public class EncapsulatedPacket {
     private long splitPacketCount = 0;
     private int splitPacketId = 0;
     private long splitPacketIndex = 0;
-    private byte[] packetData = null;
+    private ByteBuf packetData = null;
 
     private long weight;
     private long nextExecution;
-    private int resendCount;
+    private long sendTime; // Needed to track RTT
 
     public EncapsulatedPacket() {
 
@@ -44,7 +41,7 @@ public class EncapsulatedPacket {
         this.splitPacketCount = other.splitPacketCount;
         this.splitPacketId = other.splitPacketId;
         this.splitPacketIndex = other.splitPacketIndex;
-        this.packetData = other.packetData;
+        this.packetData = other.packetData == null ? null : other.packetData.retain();
     }
 
     /**
@@ -62,7 +59,7 @@ public class EncapsulatedPacket {
         byte flags = buffer.readByte();
         this.reliability = PacketReliability.getFromId( (byte) ( ( flags & 0xE0 ) >>> 5 ) );
         boolean isSplitPacket = ( flags & 0b00010000 ) > 0;
-        int packetLength = (int) Math.ceil( buffer.readUShort() / 8 );
+        int packetLength = (int) Math.ceil( buffer.readUShort() / (double) 8 );
 
         this.reliableMessageNumber = -1;
         this.sequencingIndex = -1;
@@ -109,8 +106,10 @@ public class EncapsulatedPacket {
             return false;
         }
 
-        this.packetData = new byte[packetLength];
-        buffer.readBytes( packetData );
+        if (packetLength <= buffer.getRemaining()) {
+            this.packetData = buffer.readSlice(packetLength);
+            buffer.setReadPosition(buffer.getReadPosition() + packetLength);
+        }
 
         return true;
     }
@@ -119,41 +118,44 @@ public class EncapsulatedPacket {
      * Writes the encapsulated packet to the specified packet buffer.
      *
      * @param buffer The packet buffer to write the encapuslated packet to
+     * @param time   The time at which this packet is being written to the datagram buffer
      */
-    public void writeToBuffer( PacketBuffer buffer ) {
+    public void writeToBuffer( PacketBuffer buffer, long time ) {
         byte flags = (byte) ( this.reliability.getId() << 5 );
         if ( this.isSplitPacket() ) {
             flags |= 0x10;
         }
 
-        buffer.writeByte( flags );
-        buffer.writeUShort( this.getPacketLength() << 3 );
+        buffer.writeByte( flags ); // 1
+        buffer.writeUShort( this.getPacketLength() << 3 ); // 2 | 3
 
         if ( reliability == PacketReliability.RELIABLE ||
                 reliability == PacketReliability.RELIABLE_SEQUENCED ||
                 reliability == PacketReliability.RELIABLE_ORDERED ) {
-            buffer.writeTriad( this.reliableMessageNumber );
+            buffer.writeTriad( this.reliableMessageNumber ); // 3 | 6
         }
 
         if ( reliability == PacketReliability.UNRELIABLE_SEQUENCED || reliability == PacketReliability.RELIABLE_SEQUENCED ) {
-            buffer.writeTriad( this.sequencingIndex );
+            buffer.writeTriad( this.sequencingIndex ); // 3 | 9
         }
 
         if ( reliability == PacketReliability.UNRELIABLE_SEQUENCED ||
                 reliability == PacketReliability.RELIABLE_SEQUENCED ||
                 reliability == PacketReliability.RELIABLE_ORDERED ||
                 reliability == PacketReliability.RELIABLE_ORDERED_WITH_ACK_RECEIPT ) {
-            buffer.writeTriad( this.orderingIndex );
-            buffer.writeByte( this.orderingChannel );
+            buffer.writeTriad( this.orderingIndex );    // 3 | 12
+            buffer.writeByte( this.orderingChannel );   // 1 | 13
         }
 
         if ( this.isSplitPacket() ) {
-            buffer.writeUInt( this.splitPacketCount );
-            buffer.writeUShort( this.splitPacketId );
-            buffer.writeUInt( this.splitPacketIndex );
+            buffer.writeUInt( this.splitPacketCount ); // 4 | 17
+            buffer.writeUShort( this.splitPacketId ); // 2 | 19
+            buffer.writeUInt( this.splitPacketIndex ); // 4 | 23
         }
 
-        buffer.writeBytes( this.packetData );
+        buffer.writeBytes( this.packetData.asReadOnly().readerIndex(0) );
+
+        this.sendTime = time;
     }
 
     public int getHeaderLength() {
@@ -196,7 +198,7 @@ public class EncapsulatedPacket {
     }
 
     public int getPacketLength() {
-        return this.packetData.length;
+        return this.packetData.asReadOnly().readerIndex(0).readableBytes();
     }
 
     public int getReliableMessageNumber() {
@@ -255,12 +257,16 @@ public class EncapsulatedPacket {
         this.splitPacketIndex = splitPacketIndex;
     }
 
-    public byte[] getPacketData() {
+    public ByteBuf getPacketData() {
         return packetData;
     }
 
-    public void setPacketData( byte[] packetData ) {
-        this.packetData = packetData;
+    public void setPacketData( ByteBuf packetData ) {
+        if (this.packetData != null) {
+            this.packetData.release();
+        }
+
+        this.packetData = packetData == null ? null : packetData.retain();
     }
 
     public long getWeight() {
@@ -279,8 +285,27 @@ public class EncapsulatedPacket {
         this.nextExecution = nextExecution;
     }
 
-    public void incrementSendCount() {
-        this.resendCount++;
+    public long getSendTime() {
+        return this.sendTime;
+    }
+
+    @Override
+    public boolean equals( Object obj ) {
+        if ( !( obj instanceof EncapsulatedPacket ) ) {
+            return false;
+        }
+
+        return this.reliableMessageNumber == ( (EncapsulatedPacket) obj ).reliableMessageNumber;
+    }
+
+    @Override
+    public int hashCode() {
+        return this.reliableMessageNumber;
+    }
+
+    public void release() {
+        this.packetData.release();
+        this.packetData = null;
     }
 
 }
